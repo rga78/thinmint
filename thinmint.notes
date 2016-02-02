@@ -1,0 +1,59 @@
+
+
+
+
+==== Web API =================================================================================
+
+feb 1 2016
+
+Let's do this with node.js exclusively.
+
+- node server reads the entire db (accounts.json and transactions.json) into memory.
+- serves up the data from there.
+- updates from web api immediately hardened to the db
+
+
+
+
+
+==== Cronjob ==================================================================================
+
+feb 1, 2016
+
+Step 1: Download and merge new mint data with existing DB.
+    - Read existing trans data from the DB (perhaps the filesystem)
+        - Note: existing trans data has add'l data fields than the mint data (e.g. "hasBeenCategorized")
+    - Download new trans data from mint
+    - Merge new trans data with existing trans data
+        - update db
+
+Step 2: Process the data
+    - all "hasBeenCategorized=false" sent via email
+    - TODO: allow the user to categorize directly in the email response
+            need to fetch and process email. 
+            just use web api for now.
+
+Both steps above can be done in python.  Good opportunity to learn some python.
+
+
+
+
+==== Setup ==================================================================================
+
+feb 1, 2016
+
+
+- Installed python 3.4 from cygwin (see "Python" evernote for details)
+- Installed mintapi and supporting libraries like pandas.
+    - had to make some fixes to mintapi/api.py
+
+
+- mintclient.py: downloads accounts and transactions to files accounts.json and transactions.json
+    TODO: include date in file? transactions.02012016.json
+          easier to detect "new" transactions.
+          - no.  "new" transactions are any trans that haven't been "categorized" yet by the user.
+
+    
+
+
+
