@@ -323,16 +323,6 @@ def setHasBeenAcked( trx ):
     trx[ "hasBeenAcked" ] = True
     return trx
 
-#
-# Send emails for every trx that isn't marked "hasBeenTagged"
-# This will include brand new trxs just downloaded from mint today
-# along with previous trxs that have yet to be tagged.
-#
-# @param trxs a map of thinmint trxs
-#
-# def sendEmails( trxs ):
-    # TODO
-
 
 #
 # @return formatted trx summary
