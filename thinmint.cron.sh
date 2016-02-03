@@ -38,43 +38,25 @@ fi
 
 
 #
-# Make a backup of the data
+# Get mint data
 #
-d=`date '+%m%d%y'`
-cp -R data data.$d
-
-#
-# Update accounts
-#
-echo ./mintclient.py --action getAccounts --email xxx --password xxx --outputfile=data/accounts.mint.json
-./mintclient.py --action getAccounts --email $mintuser --password $mintpass --outputfile=data/accounts.mint.json
-
-#
-# Get new trans
-#
-echo ./mintclient.py --action getTransactions --email xxx --password xxx --outputfile=data/trans.mint.json
-./mintclient.py --action getTransactions --email $mintuser --password $mintpass --outputfile=data/trans.mint.json
-
-#
-# Merge trans
-#
-echo ./mintclient.py --action mergeTransactions --mintfile=data/trans.mint.json --inputfile=data/trans.thinmint.json --outputfile=data/trans.thinmint.json
-./mintclient.py --action mergeTransactions --mintfile=data/trans.mint.json --inputfile=data/trans.thinmint.json --outputfile=data/trans.thinmint.json
+echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpas xxx
+./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpas "$mintpass"
 
 #
 # Compose email with status update, new trans in need of ACK'ing
 #
-echo ./mintclient.py --action composeEmailSummary --transfile=data/trans.thinmint.json --accountsfile=data/accounts.mint.json --outputfile=data/email.txt
-./mintclient.py --action composeEmailSummary --transfile=data/trans.thinmint.json --accountsfile=data/accounts.mint.json --outputfile=data/email.txt
+echo ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
 
 # 
 # Send email
 #
-echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to robertgalderman@gmail.com --gmailuser . --gmailpassword .
-./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'robertgalderman@gmail.com' --gmailuser "$gmailuser" --gmailpassword "$gmailpass"
-
-echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser . --gmailpassword .
-./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpassword "$gmailpass"
+# echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to robertgalderman@gmail.com --gmailuser xxx --gmailpass xxx
+# ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'robertgalderman@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
+# 
+# echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser xxx --gmailpass xxx 
+# ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
 
 
 

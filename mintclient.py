@@ -8,22 +8,22 @@
 # Usage:
 #
 # Download mint trans and accounts:
-#   $ python3 mintclient.py --action getTransactions --email . --password . --outputfile=trans.mint.json
-#   $ python3 mintclient.py --action getAccounts --email . --password . --outputfile=accounts.mint.json
+#   $ python3 mintclient.py --action getMintTransactions --mintuser . --mintpass . --outputfile=trans.mint.json
+#   $ python3 mintclient.py --action getMintAccounts --mintuser . --mintpass . --outputfile=accounts.mint.json
 #
 # Convert initial mint trans download to thinmint trans (only do this once. subsequently use mergeTransactions)
-#   $ python3 mintclient.py --action convertTransactions --inputfile=trans.mint.json --outputfile=trans.thinmint.json
+#   $ python3 mintclient.py --action convertTransactionsToMap --inputfile=trans.mint.json --outputfile=trans.thinmint.json
 #
 # Set hasBeenAcked=true for all initial trans (only do this once).
 #   $ python3 mintclient.py --action setHasBeenAcked --inputfile=trans.thinmint.json --outputfile=trans.thinmint.json
 #
 # Download new mint trans, merge with existing thinmint trans
-#   $ python3 mintclient.py --action getTransactions --email . --password . --outputfile=data/trans.mint.json
+#   $ python3 mintclient.py --action getMintTransactions --mintuser . --mintpass . --outputfile=data/trans.mint.json
 #   $ python3 mintclient.py --action mergeTransactions --mintfile=data/trans.mint.json --inputfile=data/trans.thinmint.json --outputfile=data/trans.thinmint.json
 #
 # Send email with status update, new trans in need of ACK'ing
 #   $ python3 mintclient.py --action composeEmailSummary --transfile=trans.thinmint.json --accountsfile=accounts.mint.json --outputfile=email.txt
-#   $ python3 mintclient.py --action sendEmailSummary ---inputfile=email.txt --to . --gmailuser . --gmailpassword .
+#   $ python3 mintclient.py --action sendEmailSummary ---inputfile=email.txt --to . --gmailuser . --gmailpass .
 # 
 # 
 # 
@@ -48,6 +48,8 @@ from datetime import date, datetime
 from mailer import Mailer
 from mailer import Message
 
+from pymongo import MongoClient
+
 import locale
 locale.setlocale( locale.LC_ALL, '' )
 
@@ -58,8 +60,8 @@ locale.setlocale( locale.LC_ALL, '' )
 # @return a dictionary of opt=val
 #
 def parseArgs():
-    long_options = [ "email=", 
-                     "password=", 
+    long_options = [ "mintuser=", 
+                     "mintpass=", 
                      "action=", 
                      "startdate=", 
                      "inputfile=", 
@@ -68,7 +70,7 @@ def parseArgs():
                      "transfile=",
                      "accountsfile=",
                      "gmailuser=",
-                     "gmailpassword=",
+                     "gmailpass=",
                      "to="]
     opts, args = getopt.getopt( sys.argv[1:], "", long_options )
     retMe = {}
@@ -112,26 +114,43 @@ def removeDatetime( accounts ):
 
 
 #
+# @return account data in thinmint format
+#
+def convertAccount( account ):
+    account["_id"] = account["id"]
+
+
+#
+# @return accounts data in thinmint format
+#
+def convertAccounts( accounts ):
+    accounts = removeDatetime(accounts)
+    for account in accounts:
+        convertAccount( account )
+    return accounts
+
+
+#
 # Retrieve account data from mint
 # @return accounts object
 #
-def getAccounts( args ):
-    print( "getAccounts: Logging into mint..." )
-    mint = mintapi.Mint( args["--email"], args["--password"] )
+def getMintAccounts( args ):
+    print( "getMintAccounts: Logging into mint..." )
+    mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
 
-    print( "getAccounts: Refreshing accounts..." )
+    print( "getMintAccounts: Refreshing accounts..." )
     mint.initiate_account_refresh()
 
-    print( "getAccounts: Getting accounts..." )
+    print( "getMintAccounts: Getting accounts..." )
     accounts = mint.get_accounts(True)  # True - get extended account detail (takes longer)
-    return removeDatetime( accounts )
+    return accounts
 
 
 #
-# --action getAccounts
+# --action getMintAccounts
 # 
-def doGetAccounts( args ):
-    accounts = getAccounts(args)
+def doGetMintAccounts( args ):
+    accounts = convertAccounts( getMintAccounts(args) )
     writeJson( accounts, args["--outputfile"] )
 
 
@@ -139,13 +158,13 @@ def doGetAccounts( args ):
 # Retrieve transaction data from mint
 # @return transactions object
 # 
-def getTransactions( args ):
-    print( "getTransactions: Logging into mint..." )
-    mint = mintapi.Mint( args["--email"], args["--password"] )
+def getMintTransactions( args ):
+    print( "getMintTransactions: Logging into mint..." )
+    mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
 
-    print( "getTransactions: Getting transactions..." )
+    print( "getMintTransactions: Getting transactions..." )
     trxs = mint.get_transactions_json(include_investment=False, skip_duplicates=False )     # TODO: start_date
-    print( "getTransactions: Transactions gotten: ", len(trxs) )
+    print( "getMintTransactions: Transactions gotten: ", len(trxs) )
     return trxs
 
 
@@ -181,10 +200,10 @@ def readLines( filename ):
 
 
 #
-# --action getTransactions
+# --action getMintTransactions
 # 
-def doGetTransactions( args ):
-    trxs = getTransactions(args)
+def doGetMintTransactions( args ):
+    trxs = convertTransactions( getMintTransactions(args) )
     writeJson( trxs, args["--outputfile"] )  
 
 
@@ -238,38 +257,45 @@ def convertDate( datestr, regex = re.compile( r'\d\d/\d\d/\d\d' ) ):
 # 
 def convertTransaction( trx, regex = re.compile( r'\d\d/\d\d/\d\d' )):
     trx["date"] = convertDate( trx["date"], regex )
+    trx["_id"] = trx["id"]
     return trx
 
 
 #
-# Convert trxs objects from mint-style to thinmint-style.
-# mint-style trxs are held an array.
-# thinmint-style trxs are held in a dict with each trx mapped by its id.
-#
-# @return thinmint trxs
+# @return thinmint formatted trxs. trxs are modified in place.
 #
 def convertTransactions( trxs ):
     regex = re.compile( r'\d\d/\d\d/\d\d' )     # for date conversions
+    for trx in trxs:
+        convertTransaction( trx, regex )
+    return trxs
+
+#
+# Convert trxs from an array to map, indexed by "id"
+#
+# @return thinmint trxs
+#
+def convertTransactionsToMap( trxs ):
     retMe = {}
     for trx in trxs:
-        retMe[ str(trx["id"]) ] = convertTransaction( trx, regex )
+        retMe[ str(trx["id"]) ] = trx
     return retMe
 
 
 #
-# --action convertTransactions
+# --action convertTransactionsToMap
 #
-def doConvertTransactions( args ):
+def doConvertTransactionsToMap( args ):
     trxs = readJson( args["--inputfile"] )  
     print("doConvertTransactions: read transactions: ", len(trxs))
-    trxs = convertTransactions( trxs )
+    trxs = convertTransactionsToMap( trxs )
     writeJson( trxs, args["--outputfile"] )
 
 
 #
 # Add all trxs in mintTrxs to thinmintTrxs if it doesn't already exist.
 #
-# @param mintTrxs array of trxs data downloaded from mint (doGetTransactions)
+# @param mintTrxs array of trxs data downloaded from mint (doGetMintTransactions)
 # @param thinmintTrxs map of trxs data
 #
 # @return thinmintTrxs
@@ -299,8 +325,11 @@ def doMergeTransactions( args ):
 
 #
 # Run the given function for each trx in trxs.
+#
+# @param trxs map of trxId -> trx
+# @func function to apply
 # 
-def forEachTransaction( trxs, func ):
+def forEachTransactionMap( trxs, func ):
     for trxId in trxs:
         trxs[ trxId ] = func( trxs[ trxId ] )
     return trxs
@@ -355,8 +384,8 @@ def formatNewTranHtml( trx ):
 #
 def formatNewTrans( newTrxs, formatFunc ):
     retMe = []
-    for trxId in newTrxs:
-        retMe.append( formatFunc( newTrxs[ trxId ] ) )
+    for trx in newTrxs:
+        retMe.append( formatFunc( trx ) )
     return retMe
 
 
@@ -423,9 +452,49 @@ def composeHtmlEmail( accounts, newTrxs ):
 
 
 #
+# @return trans that have yet to be acked.
+#
+def getNonAckedTransactions( db ):
+    trans = db.transactions.find( { "$or": [ { "hasBeenAcked": { "$exists": False } }, { "hasBeenAcked" : False } ] } )
+    print("getNonAckedTransactions: Found {} non-ACKed transactions out of {}".format( trans.count(), db.transactions.count() ) )
+    return trans
+
+#
+# @return active bank and credit card accounds
+#
+def getActiveBankAndCreditAccounts( db ):
+    accounts = db.accounts.find( { "$and": [ { "accountType": { "$in": [ "credit", "bank" ] } }, { "isActive" : True } ] } )
+    print("getActiveBankAndCreditAccounts: Found {} active bank/credit accounts out of {}".format( accounts.count(), db.accounts.count() ) )
+    return accounts
+
+
+#
 # Compose an email summary and write it to the --outputfile
 #
 def doComposeEmailSummary( args ) : 
+
+    db = getMongoDb( "thinmint" )
+
+    # read trans that have yet to be acked.
+    trans = getNonAckedTransactions( db )
+
+    # read active bank and credit card accounts
+    accounts = getActiveBankAndCreditAccounts( db )
+    
+    writeLines( composeHtmlEmail( accounts, trans ), args["--outputfile"] + ".html" )
+
+    # need to rewind the cursors
+    trans.rewind()
+    accounts.rewind()
+    writeLines( composeTextEmail( accounts, trans ), args["--outputfile"] )
+
+
+
+#
+# Compose an email summary and write it to the --outputfile
+# NOTE: this won't work anymore since i changed formatNewTrxs to take an iterable instead of a map..
+#
+def doComposeEmailSummary_OLD( args ) : 
     trxs = readJson( args[ "--transfile" ] )
     accounts = readJson( args[ "--accountsfile" ] )
     newTrxs = filterTransactions( trxs, lambda trx: "hasBeenAcked" not in trx or trx["hasBeenAcked"] == False )
@@ -437,6 +506,7 @@ def doComposeEmailSummary( args ) :
     
     writeLines( composeHtmlEmail( accounts, newTrxs ), args["--outputfile"] + ".html" )
     writeLines( composeTextEmail( accounts, newTrxs ), args["--outputfile"] )
+
 
 
 #
@@ -460,24 +530,110 @@ def sendEmailSummary( args ):
                      port=587,
                      use_tls=True, 
                      usr=args["--gmailuser"],
-                     pwd=args["--gmailpassword"] )
+                     pwd=args["--gmailpass"] )
     sender.send(message)
+
+
+#
+# @return a ref to the mongo db by the given name.
+#
+def getMongoDb( dbname ):
+    # TODO: authz
+    mongoClient = MongoClient('mongodb://localhost:27017/')
+    return mongoClient[dbname]
+
+
+#
+# Insert or update mint account records into mongo.
+#
+def upsertAccounts( db, accounts ):
+    for account in accounts:
+        db.accounts.update_one( { "_id": account["_id"] }, 
+                                { "$set": account }, 
+                                upsert=True )
+    print("upsertAccounts: db.accounts.count()=", db.accounts.count())
+
+
+#
+# @return str(account["_id"]) + date.today().strftime("%m/%d/%y")
+# 
+def getAccountTimeSeriesId( account ):
+    return str(account["_id"]) + "." + date.today().strftime("%m/%d/%y")
+
+#
+# @return relevant time-series data from the given account (e.g. balance)
+# 
+def getAccountTimeSeriesData( account ):
+    return {k: account[k] for k in ('accountId', 'accountName', 'currentBalance', 'value')}
+
+#
+# Insert or update account time-series records into mongo.
+# Time-series records keep track of account balance from day-to-day.
+#
+def upsertAccountsTimeSeries( db, accounts ):
+    for account in accounts:
+        db.accountsTimeSeries.update_one( { "_id": getAccountTimeSeriesId( account ) }, 
+                                          { "$set": getAccountTimeSeriesData( account ) }, 
+                                          upsert=True )
+    print("upsertAccountsTimeSeries: db.accountsTimeSeries.count()=", db.accountsTimeSeries.count())
+
+
+
+#
+# Insert or update mint transaction records into mongo.
+#
+def upsertTransactions( db, trans ):
+    for tran in trans:
+        db.transactions.update_one( { "_id": tran["_id"] }, 
+                                    { "$set": tran }, 
+                                    upsert=True )
+    print("upsertTransactions: db.transactions.count()=", db.transactions.count())
+
+
+#
+# @return subset of accounts with isActive=True
+#
+def getActiveAccounts( accounts ):
+    return list( filter(lambda act: act["isActive"], accounts) ) 
+
+#
+# Download all accounts and trans from mint.
+# Push mint accounts into db.accounts
+#   Note: existing account data will be overwritten.  This is OK since I don't intend to modify ANY mint data.
+#
+def importMintDataToMongo( args ):
+    # make sure we can reach mongo first
+    db = getMongoDb( "thinmint" )
+
+    mintAccounts = convertAccounts( getMintAccounts( args ) )
+    mintTrans = convertTransactions( getMintTransactions( args ) )
+    # -rx- mintAccounts = readJson( args["--accountsfile" ] )
+    # -rx- mintTrans = readJson( args["--transfile" ] )
+
+    upsertAccounts( db, mintAccounts )
+    upsertAccountsTimeSeries( db, getActiveAccounts( mintAccounts ) )
+
+    upsertTransactions( db, mintTrans )
+
+
+
+
 
 
 #
 # main entry point ---------------------------------------------------------------------------
 # 
 args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
-print("main: verified args=", args)
+# -rx- print("main: verified args=", args)
 
 
-if args["--action"] == "getAccounts":
-    args = verifyArgs( args , required_args = [ '--email', '--password', '--outputfile' ] )
-    doGetAccounts( args )
+if args["--action"] == "getMintAccounts":
+    args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass', '--outputfile' ] )
+    doGetMintAccounts( args )
 
-elif args["--action"] == "getTransactions":
-    args = verifyArgs( args , required_args = [ '--email', '--password', '--outputfile' ] )
-    doGetTransactions( args )
+elif args["--action"] == "getMintTransactions":
+    args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass', '--outputfile' ] )
+    doGetMintTransactions( args )
 
 elif args["--action"] == "readTransactions":
     args = verifyArgs( args , required_args = [ '--inputfile' ] )
@@ -487,9 +643,9 @@ elif args["--action"] == "readAccounts":
     args = verifyArgs( args , required_args = [ '--inputfile' ] )
     doReadAccounts( args )
 
-elif args["--action"] == "convertTransactions":
+elif args["--action"] == "convertTransactionsToMap":
     args = verifyArgs( args , required_args = [ '--inputfile', '--outputfile' ] )
-    doConvertTransactions( args )
+    doConvertTransactionsToMap( args )
 
 elif args["--action"] == "mergeTransactions":
     args = verifyArgs( args , required_args = [ '--mintfile', '--inputfile', '--outputfile' ] )
@@ -497,15 +653,27 @@ elif args["--action"] == "mergeTransactions":
 
 elif args["--action"] == "setHasBeenAcked":
     args = verifyArgs( args , required_args = [ '--inputfile', '--outputfile' ] )
-    writeJson( forEachTransaction( readJson( args[ '--inputfile' ] ), setHasBeenAcked), args[ '--outputfile' ] )
+    writeJson( forEachTransactionMap( readJson( args[ '--inputfile' ] ), setHasBeenAcked), args[ '--outputfile' ] )
+
+elif args["--action"] == "setHasBeenAckedMint":
+    args = verifyArgs( args , required_args = [ '--inputfile', '--outputfile' ] )
+    writeJson( list( map( setHasBeenAcked, readJson( args[ '--inputfile' ] ) ) ), args[ '--outputfile' ] )
+
+elif args["--action"] == "composeEmailSummary_OLD":
+    args = verifyArgs( args , required_args = [ '--transfile', '--accountsfile', '--outputfile' ] )
+    doComposeEmailSummary_OLD( args )
 
 elif args["--action"] == "composeEmailSummary":
-    args = verifyArgs( args , required_args = [ '--transfile', '--accountsfile', '--outputfile' ] )
+    args = verifyArgs( args , required_args = [ '--outputfile' ] )
     doComposeEmailSummary( args )
 
 elif args["--action"] == "sendEmailSummary":
-    args = verifyArgs( args , required_args = [ '--inputfile', '--gmailuser', '--gmailpassword', '--to' ] )
+    args = verifyArgs( args , required_args = [ '--inputfile', '--gmailuser', '--gmailpass', '--to' ] )
     sendEmailSummary( args )
+
+elif args["--action"] == "importMintDataToMongo":
+    args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass' ] )
+    importMintDataToMongo( args )
 
 
 
