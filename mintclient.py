@@ -1,3 +1,4 @@
+#! /usr/bin/python3
 # @rob4lderman
 # ThinMint utils. 
 #
@@ -17,8 +18,8 @@
 #   $ python3 mintclient.py --action setHasBeenAcked --inputfile=trans.thinmint.json --outputfile=trans.thinmint.json
 #
 # Download new mint trans, merge with existing thinmint trans
-#   $ python3 mintclient.py --action getTransactions --email . --password . --outputfile=trans.mint.json
-#   $ python3 mintclient.py --action mergeTransactions --mintfile=trans.mint.json --inputfile=trans.thinmint.json --outputfile=trans.thinmint.json
+#   $ python3 mintclient.py --action getTransactions --email . --password . --outputfile=data/trans.mint.json
+#   $ python3 mintclient.py --action mergeTransactions --mintfile=data/trans.mint.json --inputfile=data/trans.thinmint.json --outputfile=data/trans.thinmint.json
 #
 # Send email with status update, new trans in need of ACK'ing
 #   $ python3 mintclient.py --action composeEmailSummary --transfile=trans.thinmint.json --accountsfile=accounts.mint.json --outputfile=email.txt
@@ -325,24 +326,37 @@ def setHasBeenAcked( trx ):
 
 
 #
-# @return formatted trx summary
+# @return formatted trx summary in plain text
 #
-def nonAckedTranToString( trx ):
-    return "{} {}: {} - {} {}{}".format( trx["date"], 
+def formatNewTranText( trx ):
+    return "{} {}: {} - {} {}{} {}".format( trx["date"], 
                                          trx["fi"], 
                                          trx["account"], 
                                          trx["merchant"],
                                          "" if trx["isDebit"] else "+",
-                                         trx["amount"])
+                                         trx["amount"],
+                                         "(pending)" if trx["isPending"] else "" )
+
+#
+# @return formatted trx summary in html
+#
+def formatNewTranHtml( trx ):
+    return "<tr><td>{}</td><td>{}: {}</td><td>{}</td><td>{}{}</td><td>{}</td></tr>".format( trx["date"], 
+                                                                                            trx["fi"], 
+                                                                                            trx["account"], 
+                                                                                            trx["merchant"],
+                                                                                            "" if trx["isDebit"] else "+",
+                                                                                            trx["amount"],
+                                                                                            "(pending)" if trx["isPending"] else "" )
+
 
 #
 # @return lines[] of formatted trx data 
 #
-def formatNewTrans( newTrxs ):
+def formatNewTrans( newTrxs, formatFunc ):
     retMe = []
-    retMe.append( "Summary of new transactions that need to be ACKed:")
     for trxId in newTrxs:
-        retMe.append( nonAckedTranToString( newTrxs[ trxId ] ) )
+        retMe.append( formatFunc( newTrxs[ trxId ] ) )
     return retMe
 
 
@@ -350,20 +364,61 @@ def formatNewTrans( newTrxs ):
 #
 # @return formatted account summary
 #
-def accountSummaryToString( act ):
+def formatAccountText( act ):
     return "{}: {} - {}".format( act["fiName"],
                                  act["accountName"],
                                  locale.currency( act["currentBalance"] ) )
+
+#
+# @return formatted account summary
+#
+def formatAccountHtml( act ):
+    return "<tr><td>{}: {}</td><td>{}</td></tr>".format( act["fiName"],
+                                                         act["accountName"],
+                                                         locale.currency( act["currentBalance"] ) )
 
 
 #
 # @return lines[] of formatted account data
 #
-def formatAccounts( accounts ):
+def formatAccounts( accounts, formatFunc ):
     retMe = []
-    retMe.append( "Summary of accounts:" )
     for act in accounts:
-        retMe.append( accountSummaryToString( act ) )
+        retMe.append( formatFunc( act ) )
+    return retMe
+
+
+#
+# @return a plain text version of the summary email
+# 
+def composeTextEmail( accounts, newTrxs ):
+    retMe = []
+    retMe.append( "Summary of new transactions:")
+    retMe.append("")
+    retMe += formatNewTrans( newTrxs, formatNewTranText )
+    retMe.append("")
+    retMe.append("")
+    retMe.append( "Summary of accounts:" )
+    retMe.append("")
+    retMe += formatAccounts( accounts, formatAccountText)
+    return retMe
+
+
+#
+# @return an html version of the summary email
+# 
+def composeHtmlEmail( accounts, newTrxs ):
+    retMe = []
+    retMe.append("<b>Summary of new transactions</b><br/>")
+    retMe.append("<table>")
+    retMe += formatNewTrans( newTrxs, formatNewTranHtml )
+    retMe.append("</table>")
+    retMe.append("<br/>")
+    retMe.append("<br/>")
+    retMe.append("<b>Summary of accounts</b><br/>" )
+    retMe.append("<table>")
+    retMe += formatAccounts( accounts, formatAccountHtml)
+    retMe.append("</table>")
     return retMe
 
 
@@ -374,13 +429,14 @@ def doComposeEmailSummary( args ) :
     trxs = readJson( args[ "--transfile" ] )
     accounts = readJson( args[ "--accountsfile" ] )
     newTrxs = filterTransactions( trxs, lambda trx: "hasBeenAcked" not in trx or trx["hasBeenAcked"] == False )
-    
-    lines = []
-    lines += formatNewTrans( newTrxs )
-    lines.append("")
-    lines += formatAccounts( filter(lambda act: act["isActive"], accounts ) )
 
-    writeLines( lines, args["--outputfile"] )
+    # filter for active bank and credit accounts.
+    # note: filter() returns an iterable (for lazy filtering), not a list. need to convert to a list,
+    # otherwise we won't be able to iterate the iterable
+    accounts = list(filter(lambda act: act["isActive"] and act["accountType"] in [ "credit", "bank" ], accounts ))
+    
+    writeLines( composeHtmlEmail( accounts, newTrxs ), args["--outputfile"] + ".html" )
+    writeLines( composeTextEmail( accounts, newTrxs ), args["--outputfile"] )
 
 
 #
@@ -389,15 +445,16 @@ def doComposeEmailSummary( args ) :
 #
 def sendEmailSummary( args ):
 
-    message = Message(From=args["--gmailuser"]
+    message = Message(From=args["--gmailuser"],
                       To=args["--to"])
 
     message.Subject = "ThinMint Daily Account Summary"
 
-    emailLines = readLines( args["--inputfile"] )
+    emailLinesText = readLines( args["--inputfile"] )
+    emailLinesHtml = readLines( args["--inputfile"] + ".html" )
 
-    message.Html = "<br />".join( emailLines )
-    message.Body = "\n".join( emailLines )
+    message.Html = "".join( emailLinesHtml )
+    message.Body = "\n".join( emailLinesText )
 
     sender = Mailer('smtp.gmail.com', 
                      port=587,
