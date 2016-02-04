@@ -71,7 +71,8 @@ def parseArgs():
                      "accountsfile=",
                      "gmailuser=",
                      "gmailpass=",
-                     "to="]
+                     "to=",
+                     "mongouri="]
     opts, args = getopt.getopt( sys.argv[1:], "", long_options )
     retMe = {}
     for opt,val in opts:
@@ -473,7 +474,7 @@ def getActiveBankAndCreditAccounts( db ):
 #
 def doComposeEmailSummary( args ) : 
 
-    db = getMongoDb( "thinmint" )
+    db = getMongoDb( args["--mongouri"]  )
 
     # read trans that have yet to be acked.
     trans = getNonAckedTransactions( db )
@@ -537,9 +538,10 @@ def sendEmailSummary( args ):
 #
 # @return a ref to the mongo db by the given name.
 #
-def getMongoDb( dbname ):
-    # TODO: authz
-    mongoClient = MongoClient('mongodb://localhost:27017/')
+def getMongoDb( mongoUri ):
+    dbname = mongoUri.split("/")[-1]
+    mongoClient = MongoClient( mongoUri )
+    print("getMongoDb: connected to {}, database {}".format( mongoUri, dbname ) )
     return mongoClient[dbname]
 
 
@@ -603,12 +605,10 @@ def getActiveAccounts( accounts ):
 #
 def importMintDataToMongo( args ):
     # make sure we can reach mongo first
-    db = getMongoDb( "thinmint" )
+    db = getMongoDb( args["--mongouri"] )
 
     mintAccounts = convertAccounts( getMintAccounts( args ) )
     mintTrans = convertTransactions( getMintTransactions( args ) )
-    # -rx- mintAccounts = readJson( args["--accountsfile" ] )
-    # -rx- mintTrans = readJson( args["--transfile" ] )
 
     upsertAccounts( db, mintAccounts )
     upsertAccountsTimeSeries( db, getActiveAccounts( mintAccounts ) )
@@ -664,7 +664,7 @@ elif args["--action"] == "composeEmailSummary_OLD":
     doComposeEmailSummary_OLD( args )
 
 elif args["--action"] == "composeEmailSummary":
-    args = verifyArgs( args , required_args = [ '--outputfile' ] )
+    args = verifyArgs( args , required_args = [ '--mongouri', '--outputfile' ] )
     doComposeEmailSummary( args )
 
 elif args["--action"] == "sendEmailSummary":
@@ -672,7 +672,7 @@ elif args["--action"] == "sendEmailSummary":
     sendEmailSummary( args )
 
 elif args["--action"] == "importMintDataToMongo":
-    args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass' ] )
+    args = verifyArgs( args , required_args = [ '--mongouri', '--mintuser', '--mintpass' ] )
     importMintDataToMongo( args )
 
 

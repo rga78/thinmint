@@ -34,20 +34,22 @@ elif [ -z "$gmailuser" ]; then
     usage "\$gmailuser is not defined"
 elif [ -z "$gmailpass" ]; then
     usage "\$gmailpass is not defined"
+elif [ -z "$mongouri" ]; then
+    usage "\$mongouri is not defined"
 fi
 
 
 #
 # Get mint data
 #
-echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpas xxx
-./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpas "$mintpass"
+echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpass xxx --mongouri xxx
+./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpass "$mintpass" --mongouri "$mongouri"
 
 #
 # Compose email with status update, new trans in need of ACK'ing
 #
-echo ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
-./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+echo ./mintclient.py --action composeEmailSummary --mongouri=xxx --outputfile=data/email.txt
+./mintclient.py --action composeEmailSummary --mongouri="$mongouri" --outputfile=data/email.txt
 
 # 
 # Send email
