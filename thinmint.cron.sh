@@ -46,6 +46,12 @@ echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpass xx
 ./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpass "$mintpass" --mongouri "$mongouri"
 
 #
+# Resolve pending trans
+#
+echo ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
+./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
+
+#
 # Compose email with status update, new trans in need of ACK'ing
 #
 echo ./mintclient.py --action composeEmailSummary --mongouri=xxx --outputfile=data/email.txt
@@ -54,11 +60,11 @@ echo ./mintclient.py --action composeEmailSummary --mongouri=xxx --outputfile=da
 # 
 # Send email
 #
-echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to robertgalderman@gmail.com --gmailuser xxx --gmailpass xxx
-./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'robertgalderman@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
-# 
-echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser xxx --gmailpass xxx 
-./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
+# -rx- echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to robertgalderman@gmail.com --gmailuser xxx --gmailpass xxx
+# -rx- ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'robertgalderman@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
+# -rx- 
+# -rx- echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser xxx --gmailpass xxx 
+# -rx- ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
 
 
 

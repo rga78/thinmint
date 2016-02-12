@@ -164,7 +164,7 @@ def getMintTransactions( args ):
     mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
 
     print( "getMintTransactions: Getting transactions..." )
-    trxs = mint.get_transactions_json(include_investment=False, skip_duplicates=False )     # TODO: start_date
+    trxs = mint.get_transactions_json(include_investment=True, skip_duplicates=False )     # TODO: start_date
     print( "getMintTransactions: Transactions gotten: ", len(trxs) )
     return trxs
 
@@ -252,12 +252,21 @@ def convertDate( datestr, regex = re.compile( r'\d\d/\d\d/\d\d' ) ):
         tmpdate = datetime.strptime(datestr, "%b %d %Y")
         return tmpdate.strftime("%m/%d/%y")
 
+#
+# @param datestr in the format mm/dd/yy
+# 
+# @return timestamp
+#
+def getTimestamp( datestr ): 
+    return int( datetime.strptime( datestr, "%m/%d/%y").timestamp() )
+
 
 #
 # @return the trx object converted from mint style to thinmint style.
 # 
 def convertTransaction( trx, regex = re.compile( r'\d\d/\d\d/\d\d' )):
     trx["date"] = convertDate( trx["date"], regex )
+    trx["timestamp"] = getTimestamp( trx["date"] )
     trx["_id"] = trx["id"]
     return trx
 
@@ -359,25 +368,22 @@ def setHasBeenAcked( trx ):
 # @return formatted trx summary in plain text
 #
 def formatNewTranText( trx ):
-    return "{} {}: {} - {} {}{} {}".format( trx["date"], 
-                                         trx["fi"], 
-                                         trx["account"], 
-                                         trx["merchant"],
-                                         "" if trx["isDebit"] else "+",
-                                         trx["amount"],
-                                         "(pending)" if trx["isPending"] else "" )
+    return "{} {} {} [{}] {}, tags={}".format( trx["date"], 
+                                    ("" if trx["isDebit"] else "+") + trx["amount"],
+                                    trx["merchant"],
+                                    trx["fi"] + ": " + trx["account"], 
+                                    "(pending)" if trx["isPending"] else "",
+                                    trx.get("tags", []) )
 
 #
 # @return formatted trx summary in html
 #
 def formatNewTranHtml( trx ):
-    return "<tr><td>{}</td><td>{}: {}</td><td>{}</td><td>{}{}</td><td>{}</td></tr>".format( trx["date"], 
-                                                                                            trx["fi"], 
-                                                                                            trx["account"], 
-                                                                                            trx["merchant"],
-                                                                                            "" if trx["isDebit"] else "+",
-                                                                                            trx["amount"],
-                                                                                            "(pending)" if trx["isPending"] else "" )
+    return "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format( trx["date"], 
+                                                                                      ("" if trx["isDebit"] else "+") + trx["amount"],
+                                                                                      trx["merchant"],
+                                                                                      trx["fi"] + ": " + trx["account"], 
+                                                                                      "(pending)" if trx["isPending"] else "" )
 
 
 #
@@ -395,17 +401,16 @@ def formatNewTrans( newTrxs, formatFunc ):
 # @return formatted account summary
 #
 def formatAccountText( act ):
-    return "{}: {} - {}".format( act["fiName"],
-                                 act["accountName"],
-                                 locale.currency( act["currentBalance"] ) )
+    return "{} {}".format( locale.currency( act["currentBalance"] ),
+                           act["fiName"] + ": " + act["accountName"])
 
 #
 # @return formatted account summary
 #
 def formatAccountHtml( act ):
-    return "<tr><td>{}: {}</td><td>{}</td></tr>".format( act["fiName"],
-                                                         act["accountName"],
-                                                         locale.currency( act["currentBalance"] ) )
+    return "<tr><td>{}</td><td>{}</td></tr>".format( locale.currency( act["currentBalance"] ),
+                                                     act["fiName"] + ": " + act["accountName"])
+                                                    
 
 
 #
@@ -450,7 +455,6 @@ def composeHtmlEmail( accounts, newTrxs ):
     retMe += formatAccounts( accounts, formatAccountHtml)
     retMe.append("</table>")
     return retMe
-
 
 #
 # @return trans that have yet to be acked.
@@ -615,9 +619,158 @@ def importMintDataToMongo( args ):
 
     upsertTransactions( db, mintTrans )
 
+#
+# @return true if the two merchant strings match
+#
+def isMerchantMatch( merchant1, merchant2 ):
+    merchant1 = merchant1.lower()
+    merchant2 = merchant2.lower()
+    if (merchant1 == merchant2):
+        return True
+    elif ( len(merchant1) <= len(merchant2) ):
+        return merchant2.startswith( merchant1 )
+    else:
+        return merchant1.startswith( merchant2 )
+
+#
+# @return true if float1 is within tolerance of float2
+#
+def isFloatWithin( float1, float2, tolerance ):
+    if (float1 == float2):
+        return True
+    elif (float1 > float2):
+        return float1 < (float2 + tolerance)
+    elif (float1 < float2):
+        return float1 > (float2 - tolerance)
+
+#
+# @param currencystr e.g. "$5.99"
+#
+# @return the value as a float
+#
+def currencyToFloat( currencystr ):
+    return locale.atof(currencystr[1:])
+
+#
+# @return true if the merchant matches and the amount is nearly a match
+#
+def isPendingTranLikelyMatch( pendingTran, tran ):
+    return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and isFloatWithin( currencyToFloat( tran["amount"] ),
+                                                                                           currencyToFloat( pendingTran["amount"] ),
+                                                                                           currencyToFloat( pendingTran["amount"] ) * 0.30 )
+#
+# @return true if the merchant and amount matches.
+#
+def isPendingTranMatch( pendingTran, tran ):
+    return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and (tran["amount"] == pendingTran["amount"])
 
 
+#
+# Add tran1 to tran2['linkedTranIds']
+#
+# @sideeffect: tran2 is modified.
+#
+def linkTranTo( tran1, tran2):
+    linkedTranIds = tran2.setdefault('linkedTranIds',[])
+    if (tran1["_id"] not in linkedTranIds):
+        linkedTranIds.append(tran1["_id"])
 
+
+#
+# Link the two trans in their linkedTranIds field.
+# Copy the tags from the pendingTran to the clearedTran.
+# Set pendingTran.isMerged = True.
+#
+# @sideeffect: pendingTran and clearedTran are modified
+#
+def linkPendingTran( pendingTran, clearedTran ):
+    
+    linkTranTo(pendingTran, clearedTran)
+    linkTranTo(clearedTran, pendingTran)
+
+    tags = clearedTran.setdefault('tags',[])
+    for tag in pendingTran.setdefault('tags',[]):
+        if (tag not in tags):
+            tags.append(tag)
+
+    pendingTran['isResolved'] = True
+    pendingTran['hasBeenAcked'] = True
+
+    print("linkPendingTran: pendingTran: " + formatNewTranText(pendingTran))
+    print("linkPendingTran: clearedTran: " + formatNewTranText(clearedTran))
+
+
+#
+# Do a full update of the given tran in the db.
+#
+def updateTran( tran, db ):
+    db.transactions.update_one( { "_id": tran["_id"] }, 
+                                { "$set": tran } )
+
+
+#
+# @return a list of clearedTrans that are likely matches for the given pendingTran
+#
+def resolvePendingTran( pendingTran, db ):
+
+    trans = db.transactions.find( { "isPending" : False, 
+                                    "fi": pendingTran["fi"], 
+                                    "account": pendingTran["account"],
+                                    "timestamp": { "$lte": (pendingTran["timestamp"] + 86400 * 7),   # cleared within a week
+                                                   "$gte": pendingTran["timestamp"] }                # TODO: use pendingTran["timestamp"] eventually
+                                  } ) 
+
+    print("resolvePendingTran: Searching for potential matches for ", formatNewTranText(pendingTran) , ". Potential match count: ", trans.count());
+
+    # first look for exact matches
+    matches = list( filter( lambda tran: isPendingTranMatch(pendingTran, tran), trans ) )
+
+    if ( len(matches) == 0 ): 
+        # no exact matches... look for 'likely' matches..
+        trans.rewind()
+        matches = list( filter( lambda tran: isPendingTranLikelyMatch(pendingTran, tran), trans ) )
+
+    if ( len(matches) > 0 ): 
+        print("resolvePendingTran: ====> match:", formatNewTranText( matches[0] ) )
+
+    return matches
+
+
+#
+# For all pending trans not yet resolved...
+# Look for matches
+# Link matches to pendingTran
+# Push pendingTran tags to matches
+# Mark pendingTran resolved.
+#
+def resolvePendingTransactions( args ):
+    db = getMongoDb( args["--mongouri"] )
+
+    # pendingTrans = db.transactions.find( { "isPending" : True } ) 
+    pendingTrans = db.transactions.find( { "isPending" : True, 
+                                           "isResolved": { "$exists": False } } )
+
+    for pendingTran in pendingTrans:
+        clearedTrans = resolvePendingTran( pendingTran, db )
+        for clearedTran in clearedTrans:
+            linkPendingTran( pendingTran, clearedTran )
+            updateTran(clearedTran, db)
+        updateTran(pendingTran,db)
+
+
+#
+# Set timestamp field in all trans that don't have one
+#
+def setTransactionTimestamps( args ):
+    db = getMongoDb( args["--mongouri"] )
+
+    trans = db.transactions.find( { "timestamp": { "$exists": False } } )
+
+    print("setTransactionTimestamps: tran count:", trans.count())
+
+    for tran in trans:
+        tran["timestamp"] = getTimestamp( tran["date"] )
+        updateTran(tran, db)
 
 
 #
@@ -675,7 +828,13 @@ elif args["--action"] == "importMintDataToMongo":
     args = verifyArgs( args , required_args = [ '--mongouri', '--mintuser', '--mintpass' ] )
     importMintDataToMongo( args )
 
+elif args["--action"] == "resolvePendingTransactions":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    resolvePendingTransactions( args )
 
+elif args["--action"] == "setTransactionTimestamps":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    setTransactionTimestamps( args )
 
 else:
     print ( "main: Unrecognized action: " + args["--action" ] )
