@@ -365,6 +365,19 @@ def setHasBeenAcked( trx ):
 
 
 #
+# @return a subset of fields, typically for printing.
+#
+def pruneTran( tran ):
+    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'linkedTranIds', 'isResolved')}
+
+#
+# @return a subset of fields, typically for printing.
+#
+def pruneAccount( account ):
+    return {k: account.get(k) for k in ('accountId', 'accountName', 'fiName', 'accountType', 'currentBalance', 'value', 'isActive', 'lastUpdated', 'lastUpdatedInString')}
+
+
+#
 # @return formatted trx summary in plain text
 #
 def formatNewTranText( trx ):
@@ -554,6 +567,7 @@ def getMongoDb( mongoUri ):
 #
 def upsertAccounts( db, accounts ):
     for account in accounts:
+        print("upsertAccounts: account=", pruneAccount(account))
         db.accounts.update_one( { "_id": account["_id"] }, 
                                 { "$set": account }, 
                                 upsert=True )
@@ -561,25 +575,48 @@ def upsertAccounts( db, accounts ):
 
 
 #
-# @return str(account["_id"]) + date.today().strftime("%m/%d/%y")
+# @return the datestr part of {accountId}.{datestr}
+#
+def parseDateFromAccountsTimeSeriesId( record ):
+    retMe = record["_id"].split(".")[1]
+    print("parseDateFromAccountsTimeSeriesId: retMe=" + retMe, ", _id=", record["_id"] )
+    return retMe
+
+#
+# @return str(account["_id"]) + datestr
 # 
-def getAccountTimeSeriesId( account ):
-    return str(account["_id"]) + "." + date.today().strftime("%m/%d/%y")
+def getAccountTimeSeriesId( account, datestr ):
+    return str(account["_id"]) + "." + datestr
 
 #
 # @return relevant time-series data from the given account (e.g. balance)
 # 
-def getAccountTimeSeriesData( account ):
-    return {k: account[k] for k in ('accountId', 'accountName', 'currentBalance', 'value')}
+def getAccountTimeSeriesData( account, datestr ):
+    retMe = {k: account[k] for k in ('accountId', 'accountName', 'currentBalance', 'value')}
+    retMe["date"] = datestr
+    retMe["timestamp"] = getTimestamp(datestr)
+    return retMe
+
+#
+# @return an accountTimeSeries record for the given account and date
+# 
+def createAccountTimeSeriesRecord( account, datestr ):
+    retMe = getAccountTimeSeriesData( account, datestr )
+    retMe["_id"] = getAccountTimeSeriesId( account, datestr ) 
+    print( "createAccountTimeSeriesRecord: ", retMe )
+    return retMe
+
 
 #
 # Insert or update account time-series records into mongo.
 # Time-series records keep track of account balance from day-to-day.
 #
 def upsertAccountsTimeSeries( db, accounts ):
+    datestr = date.today().strftime("%m/%d/%y")
     for account in accounts:
-        db.accountsTimeSeries.update_one( { "_id": getAccountTimeSeriesId( account ) }, 
-                                          { "$set": getAccountTimeSeriesData( account ) }, 
+        record = createAccountTimeSeriesRecord( account, datestr )
+        db.accountsTimeSeries.update_one( { "_id": record["_id"] }, 
+                                          { "$set": record }, 
                                           upsert=True )
     print("upsertAccountsTimeSeries: db.accountsTimeSeries.count()=", db.accountsTimeSeries.count())
 
@@ -696,8 +733,8 @@ def linkPendingTran( pendingTran, clearedTran ):
     pendingTran['isResolved'] = True
     pendingTran['hasBeenAcked'] = True
 
-    print("linkPendingTran: pendingTran: " + formatNewTranText(pendingTran))
-    print("linkPendingTran: clearedTran: " + formatNewTranText(clearedTran))
+    print("linkPendingTran: pendingTran: ", pruneTran(pendingTran) )
+    print("linkPendingTran: clearedTran: " , pruneTran(clearedTran) )
 
 
 #
@@ -774,6 +811,27 @@ def setTransactionTimestamps( args ):
 
 
 #
+# Set timestamp field in all accountsTimeSeries that don't have one.
+#
+def setAccountsTimeSeriesTimestamps( args ):
+
+    db = getMongoDb( args["--mongouri"] )
+
+    records = db.accountsTimeSeries.find( { "timestamp": { "$exists": False } } )
+
+    print("setAccountsTimeSeriesTimestamps: recourd count:", records.count())
+
+    for record in records:
+        datestr = parseDateFromAccountsTimeSeriesId( record )
+        record["date"] = datestr
+        record["timestamp"] = getTimestamp(datestr)
+        db.accountsTimeSeries.update_one( { "_id": record["_id"] }, 
+                                          { "$set": record } )
+
+
+
+
+#
 # main entry point ---------------------------------------------------------------------------
 # 
 args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
@@ -835,6 +893,11 @@ elif args["--action"] == "resolvePendingTransactions":
 elif args["--action"] == "setTransactionTimestamps":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     setTransactionTimestamps( args )
+
+elif args["--action"] == "setAccountsTimeSeriesTimestamps":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    setAccountsTimeSeriesTimestamps( args )
+
 
 else:
     print ( "main: Unrecognized action: " + args["--action" ] )
