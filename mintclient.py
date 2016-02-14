@@ -42,8 +42,9 @@ import mintapi
 import getopt
 import sys
 import re
+import functools
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from mailer import Mailer
 from mailer import Message
@@ -72,7 +73,8 @@ def parseArgs():
                      "gmailuser=",
                      "gmailpass=",
                      "to=",
-                     "mongouri="]
+                     "mongouri=",
+                     "daysago="]
     opts, args = getopt.getopt( sys.argv[1:], "", long_options )
     retMe = {}
     for opt,val in opts:
@@ -251,6 +253,7 @@ def convertDate( datestr, regex = re.compile( r'\d\d/\d\d/\d\d' ) ):
         datestr = datestr + " {}".format( date.today().year )
         tmpdate = datetime.strptime(datestr, "%b %d %Y")
         return tmpdate.strftime("%m/%d/%y")
+
 
 #
 # @param datestr in the format mm/dd/yy
@@ -485,6 +488,14 @@ def getActiveBankAndCreditAccounts( db ):
     print("getActiveBankAndCreditAccounts: Found {} active bank/credit accounts out of {}".format( accounts.count(), db.accounts.count() ) )
     return accounts
 
+#
+# @return active accounts
+#
+def getActiveAccounts( db ):
+    accounts = db.accounts.find( { "isActive" : True } )
+    print("getActiveAccounts: Found {} active bank/credit accounts out of {}".format( accounts.count(), db.accounts.count() ) )
+    return accounts
+
 
 #
 # Compose an email summary and write it to the --outputfile
@@ -563,14 +574,21 @@ def getMongoDb( mongoUri ):
 
 
 #
+# Upsert account record.
+#
+def upsertAccount( db, account ):
+    print("upsertAccount: account=", pruneAccount(account))
+    db.accounts.update_one( { "_id": account["_id"] }, 
+                            { "$set": account }, 
+                            upsert=True )
+
+
+#
 # Insert or update mint account records into mongo.
 #
 def upsertAccounts( db, accounts ):
     for account in accounts:
-        print("upsertAccounts: account=", pruneAccount(account))
-        db.accounts.update_one( { "_id": account["_id"] }, 
-                                { "$set": account }, 
-                                upsert=True )
+        upsertAccount(db, account)
     print("upsertAccounts: db.accounts.count()=", db.accounts.count())
 
 
@@ -588,6 +606,25 @@ def parseDateFromAccountsTimeSeriesId( record ):
 def getAccountTimeSeriesId( account, datestr ):
     return str(account["_id"]) + "." + datestr
 
+
+#
+# @param timestamp_ms in milliseconds
+#
+# @return datestr mm/dd/yy for the given timestamp_ms
+#
+def formatDateString_ms( timestamp_ms ):
+    return formatDateString_s( timestamp_ms / 1000 )
+
+
+#
+# @param timestamp_s in seconds
+#
+# @return datestr mm/dd/yy for the given timestamp_s
+#
+def formatDateString_s( timestamp_s ):
+    return datetime.fromtimestamp( timestamp_s ).strftime( "%m/%d/%y" )
+
+
 #
 # @return relevant time-series data from the given account (e.g. balance)
 # 
@@ -597,29 +634,59 @@ def getAccountTimeSeriesData( account, datestr ):
     retMe["timestamp"] = getTimestamp(datestr)
     return retMe
 
+
 #
 # @return an accountTimeSeries record for the given account and date
 # 
-def createAccountTimeSeriesRecord( account, datestr ):
+def createAccountTimeSeriesRecord( account ):
+    datestr = formatDateString_ms( account["fiLastUpdated"] ) 
     retMe = getAccountTimeSeriesData( account, datestr )
     retMe["_id"] = getAccountTimeSeriesId( account, datestr ) 
     print( "createAccountTimeSeriesRecord: ", retMe )
     return retMe
 
+#
+# @param account
+# @param timestamp the new record's timestamp
+# @param nextRecord the next/subsequent/later time-series record for this account
+# @param tranSum the sum of tran amounts in the intervening time between timestamp and nextRecord.timestamp
+#
+# @return a "backfill" accountTimeSeries record for the given data
+# 
+def createBackfillAccountTimeSeriesRecord( account, timestamp, nextRecord, tranSum ):
+    datestr = formatDateString_s( timestamp )
+    retMe = getAccountTimeSeriesData( account, datestr )
+
+    # subtract the tran amount, since we're going backwards in time (like we're rolling back the trans)
+    retMe["value"] = nextRecord["value"] - tranSum
+    retMe["currentBalance"] = -1 * retMe["value"] if account["accountType"] == "credit" else retMe["value"]
+
+    retMe["_id"] = getAccountTimeSeriesId( account, datestr ) 
+    retMe["isBackfill"] = True
+
+    print( "createBackfillAccountTimeSeriesRecord: ", retMe )
+    return retMe
+
+
+#
+# Insert or update a single account time-series record into mongo.
+# Time-series records keep track of account balance from day-to-day.
+#
+def upsertAccountsTimeSeriesRecord( db, record ):
+    db.accountsTimeSeries.update_one( { "_id": record["_id"] }, 
+                                      { "$set": record }, 
+                                      upsert=True )
 
 #
 # Insert or update account time-series records into mongo.
 # Time-series records keep track of account balance from day-to-day.
 #
 def upsertAccountsTimeSeries( db, accounts ):
-    datestr = date.today().strftime("%m/%d/%y")
     for account in accounts:
-        record = createAccountTimeSeriesRecord( account, datestr )
-        db.accountsTimeSeries.update_one( { "_id": record["_id"] }, 
-                                          { "$set": record }, 
-                                          upsert=True )
-    print("upsertAccountsTimeSeries: db.accountsTimeSeries.count()=", db.accountsTimeSeries.count())
+        record = createAccountTimeSeriesRecord( account )
+        upsertAccountsTimeSeriesRecord( db, record )
 
+    print("upsertAccountsTimeSeries: db.accountsTimeSeries.count()=", db.accountsTimeSeries.count())
 
 
 #
@@ -636,8 +703,9 @@ def upsertTransactions( db, trans ):
 #
 # @return subset of accounts with isActive=True
 #
-def getActiveAccounts( accounts ):
+def filterActiveAccounts( accounts ):
     return list( filter(lambda act: act["isActive"], accounts) ) 
+
 
 #
 # Download all accounts and trans from mint.
@@ -652,9 +720,10 @@ def importMintDataToMongo( args ):
     mintTrans = convertTransactions( getMintTransactions( args ) )
 
     upsertAccounts( db, mintAccounts )
-    upsertAccountsTimeSeries( db, getActiveAccounts( mintAccounts ) )
+    upsertAccountsTimeSeries( db, filterActiveAccounts( mintAccounts ) )
 
     upsertTransactions( db, mintTrans )
+
 
 #
 # @return true if the two merchant strings match
@@ -669,6 +738,7 @@ def isMerchantMatch( merchant1, merchant2 ):
     else:
         return merchant1.startswith( merchant2 )
 
+
 #
 # @return true if float1 is within tolerance of float2
 #
@@ -680,6 +750,7 @@ def isFloatWithin( float1, float2, tolerance ):
     elif (float1 < float2):
         return float1 > (float2 - tolerance)
 
+
 #
 # @param currencystr e.g. "$5.99"
 #
@@ -687,6 +758,7 @@ def isFloatWithin( float1, float2, tolerance ):
 #
 def currencyToFloat( currencystr ):
     return locale.atof(currencystr[1:])
+
 
 #
 # @return true if the merchant matches and the amount is nearly a match
@@ -753,7 +825,7 @@ def resolvePendingTran( pendingTran, db ):
     trans = db.transactions.find( { "isPending" : False, 
                                     "fi": pendingTran["fi"], 
                                     "account": pendingTran["account"],
-                                    "timestamp": { "$lte": (pendingTran["timestamp"] + 86400 * 7),   # cleared within a week
+                                    "timestamp": { "$lte": (pendingTran["timestamp"] + (86400 * 7) ),   # cleared within a week
                                                    "$gte": pendingTran["timestamp"] }                # TODO: use pendingTran["timestamp"] eventually
                                   } ) 
 
@@ -829,6 +901,162 @@ def setAccountsTimeSeriesTimestamps( args ):
                                           { "$set": record } )
 
 
+#
+# @return the first record in accountsTimeSeries for the given account after the given date
+#
+def getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db ):
+    retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
+                                              "timestamp": { "$gte": begindate.timestamp() } },
+                                            sort=[ ("timestamp", 1) ] )
+    print("getFirstAccountTimeSeriesRecordAfterDate: begindate:", begindate.timestamp(), "retMe:", retMe )
+    return retMe 
+
+
+#
+# @return the first record in accountsTimeSeries for the given account after the given date
+#
+def findEarliestAccountsTimeSeriesRecord( account, db ):
+    retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
+                                              "isBackfill": { "$exists": False } },
+                                             sort=[ ("timestamp", 1) ] )
+    print("findEarliestAccountsTimeSeriesRecord: ", retMe )
+    return retMe 
+
+
+#
+# Set account performance field ("7daysago", "30daysago", "90daysago", "365daysago")
+#
+def updateAccountPerformance( account, fieldName, begindate, db ):
+    record = getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db)
+    if (record):
+        account[fieldName] = account["value"] - record["value"]
+        print("updateAccountPerformance: accountTimeSeries record=", record)
+        print("updateAccountPerformance: account=", account)
+        upsertAccount(db, account)
+
+
+#
+# Set account performance fields ("7daysago", "30daysago", "90daysago", "365daysago")
+# for all accounts.
+# 
+def setAccountPerformance( args ):
+
+    db = getMongoDb( args["--mongouri"] )
+    accounts = getActiveAccounts(db)
+
+    # delta = timedelta( days=int(args["--daysago"]) )
+
+    for daysago in [7, 30, 90, 365]:
+        delta = timedelta( days=daysago )
+        begindate = datetime.today() - delta
+        fieldName = "last" + str(daysago) + "days"
+        print("setAccountPerformance: begindate=" + begindate.strftime("%m/%d/%y"), "fieldName=" + fieldName)
+
+        accounts.rewind()
+        for account in accounts:
+            updateAccountPerformance( account, fieldName, begindate, db )
+
+
+#
+# @return db cursor to all trans for the given account
+#
+def getAccountTransactions( account, db ):
+    retMe = db.transactions.find( { "isPending": False,
+                                    "fi": account["fiName"],
+                                    "account": account["accountName"] } )
+    print("getAccountTransactions: account=" + account["accountName"], "trans.count:", retMe.count())
+    return retMe
+    
+
+#
+# @return list of trans within the given timestamps
+#
+def filterTransInRange( trans, startTimestamp, endTimestamp ):
+    retMe = list(filter(lambda tran: tran["timestamp"] >= startTimestamp and tran["timestamp"] <= endTimestamp, 
+                        trans))
+    print("filterTransInRange: startTimestamp:", startTimestamp, "endTimestamp:", endTimestamp )
+    for tran in retMe:
+        print("filterTransInRange: tran:", pruneTran(tran) )
+
+    return retMe
+
+
+#
+# @return signed tran amount (negative if "isDebit")
+#
+def getSignedTranAmount(tran):
+    sign = -1 if tran["isDebit"] else 1
+    return sign * currencyToFloat( tran["amount"] )
+
+
+#
+# @return the sum of amounts for all given trans
+#
+def sumTranAmounts( trans ):
+    retMe = functools.reduce( lambda memo, tran: memo + getSignedTranAmount(tran),
+                              trans,
+                              0 )
+    print("sumTranAmounts: ", retMe )
+    return retMe
+
+
+#
+# @return true if there exists a tran that is earlier than the given timestamp
+#
+def doesEarlierTranExist( trans, timestamp ):
+    retMe = list(filter(lambda tran: tran["timestamp"] < timestamp, 
+                        trans))
+    print( "doesEarlierTranExist: timestamp:", timestamp, "len:", len(retMe) )
+    return len(retMe) > 0
+
+
+#
+# TODO: this won't be exact.  can't tell which trans were included in the earliest-time-series record
+#       and which weren't.  oh well. include same-day trans or no?  YES.  Assume same-day trans are
+#       already included in the earliest-time-series record. We need to include them in order to compute
+#       the time-series record for 7 days ago (it's like we're rolling back the trans between now and then).
+#
+def backfillTimeSeries( account, db ):
+
+    trans = list( getAccountTransactions( account, db ) )
+
+    # Note: this algorithm goes *backward* in time... 
+    currRecord = findEarliestAccountsTimeSeriesRecord( account, db )
+    currTimestamp = currRecord["timestamp"] 
+    
+    while doesEarlierTranExist( trans, currTimestamp + 1):     # include trans == currTimestamp
+        weekAgoTimestamp = currTimestamp - (7 * 86400)
+        amount = sumTranAmounts( filterTransInRange( trans, weekAgoTimestamp+1, currTimestamp ) )
+
+        weekAgoRecord = createBackfillAccountTimeSeriesRecord( account, weekAgoTimestamp, currRecord, amount )
+
+        upsertAccountsTimeSeriesRecord( db, weekAgoRecord )
+        currTimestamp = weekAgoTimestamp
+        currRecord = weekAgoRecord
+
+
+
+#
+# Backfill account performance fields ("7daysago", "30daysago", "90daysago", "365daysago").
+#
+# For each account...
+# Find earliest accountsTimeSeries entry
+# Check if there are any earlier transactions
+# If yes, get trans between 'earliest accountsTimeSeries date' and 7 days prior
+# Sum total value of trans
+# Create new accountsTimeSeries entry
+# Loop
+# 
+def backfillAccountsTimeSeries( args ):
+
+    db = getMongoDb( args["--mongouri"] )
+    accounts = getActiveBankAndCreditAccounts(db)
+
+    for account in accounts:
+        print( "accountName=" + account["accountName"], "fiLastUpdated=", account["fiLastUpdated"], "datestr=" + formatDateString_ms( account["fiLastUpdated"] ) )
+        backfillTimeSeries( account, db )
+
+
 
 
 #
@@ -897,6 +1125,15 @@ elif args["--action"] == "setTransactionTimestamps":
 elif args["--action"] == "setAccountsTimeSeriesTimestamps":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     setAccountsTimeSeriesTimestamps( args )
+
+elif args["--action"] == "setAccountPerformance":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    setAccountPerformance( args );
+
+elif args["--action"] == "backfillAccountsTimeSeries":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    backfillAccountsTimeSeries( args );
+
 
 
 else:

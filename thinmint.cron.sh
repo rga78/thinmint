@@ -46,6 +46,12 @@ echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpass xx
 ./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpass "$mintpass" --mongouri "$mongouri"
 
 #
+# Update account performance (last 7 days, 30 days, and so on)
+#
+echo ./mintclient.py --action setAccountPerformance --mongouri $mongouri
+./mintclient.py --action setAccountPerformance --mongouri $mongouri
+
+#
 # Resolve pending trans
 #
 echo ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
