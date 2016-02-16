@@ -271,6 +271,7 @@ def convertTransaction( trx, regex = re.compile( r'\d\d/\d\d/\d\d' )):
     trx["date"] = convertDate( trx["date"], regex )
     trx["timestamp"] = getTimestamp( trx["date"] )
     trx["_id"] = trx["id"]
+    trx["amountValue"] = getSignedTranAmount( trx )
     return trx
 
 
@@ -881,6 +882,20 @@ def setTransactionTimestamps( args ):
         tran["timestamp"] = getTimestamp( tran["date"] )
         updateTran(tran, db)
 
+#
+# Set transaction amountValue
+#
+def setTransactionAmountValues( args ):
+    db = getMongoDb( args["--mongouri"] )
+
+    trans = db.transactions.find( { "amountValue": { "$exists": False } } )
+
+    print("setTransactionAmountValues: tran count:", trans.count())
+
+    for tran in trans:
+        tran["amountValue"] = getSignedTranAmount( tran )
+        updateTran(tran, db)
+
 
 #
 # Set timestamp field in all accountsTimeSeries that don't have one.
@@ -1121,6 +1136,10 @@ elif args["--action"] == "resolvePendingTransactions":
 elif args["--action"] == "setTransactionTimestamps":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     setTransactionTimestamps( args )
+
+elif args["--action"] == "setTransactionAmountValues":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    setTransactionAmountValues( args )
 
 elif args["--action"] == "setAccountsTimeSeriesTimestamps":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
