@@ -1050,7 +1050,6 @@ def backfillTimeSeries( account, db ):
         currRecord = weekAgoRecord
 
 
-
 #
 # Backfill account performance fields ("7daysago", "30daysago", "90daysago", "365daysago").
 #
@@ -1068,8 +1067,33 @@ def backfillAccountsTimeSeries( args ):
     accounts = getActiveBankAndCreditAccounts(db)
 
     for account in accounts:
-        print( "accountName=" + account["accountName"], "fiLastUpdated=", account["fiLastUpdated"], "datestr=" + formatDateString_ms( account["fiLastUpdated"] ) )
+        print( "backfillAccountsTimeSeries: accountName=" + account["accountName"], "fiLastUpdated=", account["fiLastUpdated"], "datestr=" + formatDateString_ms( account["fiLastUpdated"] ) )
         backfillTimeSeries( account, db )
+
+
+#
+# Remove unused tags.
+# 
+def removeUnusedTags( args ):
+
+    db = getMongoDb( args["--mongouri"] )
+    trans = db.transactions.find({ "tags": { "$exists": True, "$ne": [] } }, projection= { "tags": True } );
+
+    print("removeUnusedTags: trans.count=", trans.count())
+
+    tranSet = set()
+
+    for tran in trans:
+        for tag in tran["tags"]:
+            tranSet.add( tag ) 
+
+    print( "removeUnusedTags: transaction tags=", tranSet );
+    db.tags.update_one( { "_id": 1 }, 
+                        { "$set": { "tags": list(tranSet) } } )
+
+    dbtags = db.tags.find_one()["tags"];
+    print("removeUnusedTags: after update: dbtags=", dbtags)
+    print("removeUnusedTags: after update: dbtags - tranSet =", (set(dbtags) - tranSet))
 
 
 
@@ -1152,6 +1176,11 @@ elif args["--action"] == "setAccountPerformance":
 elif args["--action"] == "backfillAccountsTimeSeries":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     backfillAccountsTimeSeries( args );
+
+elif args["--action"] == "removeUnusedTags":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    removeUnusedTags( args );
+
 
 
 

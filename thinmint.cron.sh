@@ -58,6 +58,12 @@ echo ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri"
 ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
 
 #
+# Remove unused tags
+#
+echo ./mintclient.py --action removeUnusedTags --mongouri "$mongouri" 
+./mintclient.py --action removeUnusedTags --mongouri "$mongouri" 
+
+#
 # Compose email with status update, new trans in need of ACK'ing
 #
 echo ./mintclient.py --action composeEmailSummary --mongouri=xxx --outputfile=data/email.txt

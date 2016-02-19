@@ -1,5 +1,14 @@
 
 
+==== mongoimport =================================================================================
+
+$ C:\easy\mysandbox\thinmint> C:\mongodb-2.6.11\bin\mongoimport --host localhost --db thinmint --collection accountsTimeSeries --jsonArray --file data/backfill.401k.json
+$ C:\easy\mysandbox\thinmint> C:\mongodb-2.6.11\bin\mongoimport --host localhost --db thinmint --collection accountsTimeSeries --jsonArray --file data/backfill.ibmstock.json
+
+$ ./mintclient.py --action setAccountsTimeSeriesTimestamps --mongouri $mongouri
+$ ./mintclient.py --action setAccountPerformance --mongouri $mongouri
+ 
+
 
 
 ==== Web API =================================================================================
