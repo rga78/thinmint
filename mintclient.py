@@ -44,6 +44,9 @@ import sys
 import re
 import functools
 
+import hashlib
+
+
 from datetime import date, datetime, timedelta
 
 from mailer import Mailer
@@ -74,7 +77,9 @@ def parseArgs():
                      "gmailpass=",
                      "to=",
                      "mongouri=",
-                     "daysago="]
+                     "daysago=",
+                     "user=",
+                     "pass="]
     opts, args = getopt.getopt( sys.argv[1:], "", long_options )
     retMe = {}
     for opt,val in opts:
@@ -1126,6 +1131,27 @@ def autoTagTrans( args ):
             updateTran(tran, db)
 
 
+#
+# Add a user to the DB
+# 
+def addUser( args ):
+
+    db = getMongoDb( args["--mongouri"] )
+
+    user = args["--user"]
+    password = args["--pass"]
+
+    m = hashlib.md5()
+    m.update(password.encode("utf-8"))
+    dig = m.hexdigest()
+
+    print("addUser: user=" + user + ", digest=" + dig);
+
+    db["tm-users"].update_one( { "_id": user }, 
+                               { "$set": { "password": dig } }, 
+                               upsert=True )
+
+
 
 #
 # main entry point ---------------------------------------------------------------------------
@@ -1213,6 +1239,11 @@ elif args["--action"] == "removeUnusedTags":
 elif args["--action"] == "autoTagTrans":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     autoTagTrans( args );
+
+elif args["--action"] == "addUser":
+    args = verifyArgs( args , required_args = [ '--mongouri', '--user', '--pass' ] )
+    addUser( args );
+
 
 
 else:
