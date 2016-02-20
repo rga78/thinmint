@@ -1,5 +1,22 @@
 
 
+
+==== auto-tagging =================================================================================
+
+auto-tag based on merchant?
+search for all trans with merchant
+count up the tags across all trans
+divide tag-count / num-trans
+if any tag is on more than 50% of trans, then auto-tag it.
+    - most trans haven't been tagged...
+just apply the most common tag(s)
+or just apply every tag from any previuos tran?
+or just apply tags from the previous tran only?  <-- this one.
+
+
+
+
+
 ==== mongoimport =================================================================================
 
 $ C:\easy\mysandbox\thinmint> C:\mongodb-2.6.11\bin\mongoimport --host localhost --db thinmint --collection accountsTimeSeries --jsonArray --file data/backfill.401k.json

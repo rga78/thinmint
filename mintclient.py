@@ -372,7 +372,7 @@ def setHasBeenAcked( trx ):
 # @return a subset of fields, typically for printing.
 #
 def pruneTran( tran ):
-    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'linkedTranIds', 'isResolved')}
+    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'linkedTranIds', 'isResolved', 'tags')}
 
 #
 # @return a subset of fields, typically for printing.
@@ -401,7 +401,6 @@ def formatNewTranHtml( trx ):
                                                                                       trx["merchant"],
                                                                                       trx["fi"] + ": " + trx["account"], 
                                                                                       "(pending)" if trx["isPending"] else "" )
-
 
 #
 # @return lines[] of formatted trx data 
@@ -798,10 +797,11 @@ def linkPendingTran( pendingTran, clearedTran ):
     linkTranTo(pendingTran, clearedTran)
     linkTranTo(clearedTran, pendingTran)
 
-    tags = clearedTran.setdefault('tags',[])
-    for tag in pendingTran.setdefault('tags',[]):
-        if (tag not in tags):
-            tags.append(tag)
+    applyTags( pendingTran, clearedTran )
+    # tags = clearedTran.setdefault('tags',[])
+    # for tag in pendingTran.setdefault('tags',[]):
+    #     if (tag not in tags):
+    #         tags.append(tag)
 
     pendingTran['isResolved'] = True
     pendingTran['hasBeenAcked'] = True
@@ -1096,6 +1096,35 @@ def removeUnusedTags( args ):
     print("removeUnusedTags: after update: dbtags - tranSet =", (set(dbtags) - tranSet))
 
 
+#
+# Copy the tags from fromTran to toTran.
+#
+def applyTags( fromTran, toTran ):
+    tags = toTran.setdefault("tags",[])
+    for tag in fromTran.setdefault("tags",[]):
+        if (tag not in tags):
+            tags.append(tag)
+
+
+#
+# Auto-tag non-ack'ed trans.
+#
+def autoTagTrans( args ):
+    db = getMongoDb( args["--mongouri"] )
+    trans = getNonAckedTransactions( db )
+
+    for tran in trans:
+        prevTran = db.transactions.find_one( {  "merchant": tran["merchant"],
+                                                "tags": { "$exists": True, "$ne": [] },
+                                                "hasBeenAcked": True
+                                             },
+                                             sort=[ ("timestamp", -1) ] );
+        if prevTran is not None:
+            print("autoTagTrans: tran:", pruneTran(tran))
+            print("autoTagTrans: prev tran:", pruneTran(prevTran)) 
+            applyTags(prevTran, tran);
+            updateTran(tran, db)
+
 
 
 #
@@ -1181,7 +1210,9 @@ elif args["--action"] == "removeUnusedTags":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     removeUnusedTags( args );
 
-
+elif args["--action"] == "autoTagTrans":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    autoTagTrans( args );
 
 
 else:
