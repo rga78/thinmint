@@ -60,8 +60,8 @@ echo ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri"
 #
 # Remove unused tags
 #
-echo ./mintclient.py --action removeUnusedTags --mongouri "$mongouri" 
-./mintclient.py --action removeUnusedTags --mongouri "$mongouri" 
+echo ./mintclient.py --action refreshTags --mongouri "$mongouri" 
+./mintclient.py --action refreshTags --mongouri "$mongouri" 
 
 #
 # Auto tag..

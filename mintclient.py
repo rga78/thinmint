@@ -263,7 +263,7 @@ def convertDate( datestr, regex = re.compile( r'\d\d/\d\d/\d\d' ) ):
 #
 # @param datestr in the format mm/dd/yy
 # 
-# @return timestamp
+# @return timestamp (secons since epoch)
 #
 def getTimestamp( datestr ): 
     return int( datetime.strptime( datestr, "%m/%d/%y").timestamp() )
@@ -819,6 +819,7 @@ def linkPendingTran( pendingTran, clearedTran ):
 # Do a full update of the given tran in the db.
 #
 def updateTran( tran, db ):
+    print("updateTran: tran._id=", tran["_id"])
     db.transactions.update_one( { "_id": tran["_id"] }, 
                                 { "$set": tran } )
 
@@ -921,42 +922,91 @@ def setAccountsTimeSeriesTimestamps( args ):
                                           { "$set": record } )
 
 
+# -rx- #
+# -rx- # @return the first record in accountsTimeSeries for the given account after the given date
+# -rx- #
+# -rx- def getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db ):
+# -rx-     retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
+# -rx-                                               "timestamp": { "$gte": begindate.timestamp() } },
+# -rx-                                             sort=[ ("timestamp", 1) ] )
+# -rx-     print("getFirstAccountTimeSeriesRecordAfterDate: begindate:", begindate.timestamp(), "retMe:", retMe )
+# -rx-     return retMe 
+
 #
-# @return the first record in accountsTimeSeries for the given account after the given date
+# @return the first record in accountsTimeSeries for the given account BEFORE the given date
 #
-def getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db ):
+def getPreviousAccountTimeSeriesRecordBeforeDate( account, begindate, db ):
     retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
-                                              "timestamp": { "$gte": begindate.timestamp() } },
-                                            sort=[ ("timestamp", 1) ] )
-    print("getFirstAccountTimeSeriesRecordAfterDate: begindate:", begindate.timestamp(), "retMe:", retMe )
+                                              "timestamp": { "$lte": begindate.timestamp() } },
+                                            sort=[ ("timestamp", -1) ] )
+    print("getPreviousAccountTimeSeriesRecordBeforeDate: begindate:", begindate.timestamp(), "retMe:", retMe )
     return retMe 
 
 
+# -rx- #
+# -rx- # @return the last record in accountsTimeSeries for the given account 
+# -rx- #
+# -rx- def getLastAccountTimeSeriesRecord( account, db ):
+# -rx-     retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"] },
+# -rx-                                             sort=[ ("timestamp", -1) ] )
+# -rx-     print("getLastAccountTimeSeriesRecord: retMe:", retMe )
+# -rx-     return retMe 
+
+
 #
-# @return the first record in accountsTimeSeries for the given account after the given date
+# @return the first non-back-filled record (isBackfill=false) in accountsTimeSeries for the given account 
 #
-def findEarliestAccountsTimeSeriesRecord( account, db ):
+def getFirstNonBackfillAccountsTimeSeriesRecord( account, db ):
     retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
                                               "isBackfill": { "$exists": False } },
                                              sort=[ ("timestamp", 1) ] )
-    print("findEarliestAccountsTimeSeriesRecord: ", retMe )
+    print("getFirstNonBackfillAccountsTimeSeriesRecord: ", retMe )
+    return retMe 
+
+#
+# @return the first record in accountsTimeSeries for the given account 
+#
+def getFirstAccountTimeSeriesRecord( account, db ):
+    retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"] },
+                                            sort=[ ("timestamp", 1) ] )
+    print("getFirstAccountTimeSeriesRecord: ", retMe )
     return retMe 
 
 
 #
-# Set account performance field ("7daysago", "30daysago", "90daysago", "365daysago")
+# Set account performance field ("last7days", "last30days", "last90days", "last365days")
 #
 def updateAccountPerformance( account, fieldName, begindate, db ):
-    record = getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db)
+    # the begindate is either 7daysago, 30daysago, etc.
+    # search for the first record *before* that date to use for comparison to today.
+    # if there's no record that early, just get the first one
+    # to see why, let's imagine there's the following time-series records: 
+    # from 35 days ago, balance=20
+    # from 15 days ago, balance=10,
+    # from 10 days ago,  balance=5
+    # current balance is 5.  
+    # what will the performances be?
+    # last7days: 10 days ago: 5 - 5 = 0
+    # last30days: 35 days ago: 5 - 20 = -15
+    # last90days: 35 days ago: 5 - 20 = -15
+    record = getPreviousAccountTimeSeriesRecordBeforeDate( account, begindate, db)
     if (record):
         account[fieldName] = account["value"] - record["value"]
-        print("updateAccountPerformance: accountTimeSeries record=", record)
-        print("updateAccountPerformance: account=", account)
-        upsertAccount(db, account)
+        print("updateAccountPerformance: begindate=" + begindate.strftime("%m/%d/%y"), "PREVIOUS accountTimeSeries record=", record)
+    else:
+        record = getFirstAccountTimeSeriesRecord( account, db)
+        if (record):
+            account[fieldName] = account["value"] - record["value"]
+            print("updateAccountPerformance: begindate=" + begindate.strftime("%m/%d/%y"), "FIRST accountTimeSeries record=", record)
+        else:
+            account[fieldName] = 0
+
+    print("updateAccountPerformance: account=", pruneAccount(account))
+    upsertAccount(db, account)
 
 
 #
-# Set account performance fields ("7daysago", "30daysago", "90daysago", "365daysago")
+# Set account performance fields ("last7days", "last30days", "last90days", "last365days")
 # for all accounts.
 # 
 def setAccountPerformance( args ):
@@ -1041,7 +1091,7 @@ def backfillTimeSeries( account, db ):
     trans = list( getAccountTransactions( account, db ) )
 
     # Note: this algorithm goes *backward* in time... 
-    currRecord = findEarliestAccountsTimeSeriesRecord( account, db )
+    currRecord = getFirstNonBackfillAccountsTimeSeriesRecord( account, db )
     currTimestamp = currRecord["timestamp"] 
     
     while doesEarlierTranExist( trans, currTimestamp + 1):     # include trans == currTimestamp
@@ -1079,12 +1129,12 @@ def backfillAccountsTimeSeries( args ):
 #
 # Remove unused tags.
 # 
-def removeUnusedTags( args ):
+def refreshTags( args ):
 
     db = getMongoDb( args["--mongouri"] )
     trans = db.transactions.find({ "tags": { "$exists": True, "$ne": [] } }, projection= { "tags": True } );
 
-    print("removeUnusedTags: trans.count=", trans.count())
+    print("refreshTags: trans.count=", trans.count())
 
     tranSet = set()
 
@@ -1092,13 +1142,13 @@ def removeUnusedTags( args ):
         for tag in tran["tags"]:
             tranSet.add( tag ) 
 
-    print( "removeUnusedTags: transaction tags=", tranSet );
+    print( "refreshTags: transaction tags=", tranSet );
     db.tags.update_one( { "_id": 1 }, 
                         { "$set": { "tags": list(tranSet) } } )
 
     dbtags = db.tags.find_one()["tags"];
-    print("removeUnusedTags: after update: dbtags=", dbtags)
-    print("removeUnusedTags: after update: dbtags - tranSet =", (set(dbtags) - tranSet))
+    print("refreshTags: after update: dbtags=", dbtags)
+    print("refreshTags: after update: dbtags - tranSet =", (set(dbtags) - tranSet))
 
 
 #
@@ -1112,6 +1162,16 @@ def applyTags( fromTran, toTran ):
 
 
 #
+# Apply automatic tags based on tran data
+#
+def applyAutoTags(tran):
+    if (tran["txnType"] == 1):
+        tags = tran.setdefault("tags",[])
+        if ("investment" not in tags):
+            tags.append("investment")
+
+    
+#
 # Auto-tag non-ack'ed trans.
 #
 def autoTagTrans( args ):
@@ -1119,6 +1179,7 @@ def autoTagTrans( args ):
     trans = getNonAckedTransactions( db )
 
     for tran in trans:
+        applyAutoTags(tran)
         prevTran = db.transactions.find_one( {  "merchant": tran["merchant"],
                                                 "tags": { "$exists": True, "$ne": [] },
                                                 "hasBeenAcked": True
@@ -1129,6 +1190,16 @@ def autoTagTrans( args ):
             print("autoTagTrans: prev tran:", pruneTran(prevTran)) 
             applyTags(prevTran, tran);
             updateTran(tran, db)
+
+#
+# backfill auto tags
+#
+def backfillAutoTags( args ):
+    db = getMongoDb( args["--mongouri"] )
+    trans = db.transactions.find({}, projection={ "_id": True, "txnType": True, "tags": True } );
+    for tran in trans:
+        applyAutoTags(tran)
+        updateTran(tran, db)
 
 
 #
@@ -1150,7 +1221,6 @@ def addUser( args ):
     db["tm-users"].update_one( { "_id": user }, 
                                { "$set": { "password": dig } }, 
                                upsert=True )
-
 
 
 #
@@ -1232,9 +1302,9 @@ elif args["--action"] == "backfillAccountsTimeSeries":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     backfillAccountsTimeSeries( args );
 
-elif args["--action"] == "removeUnusedTags":
+elif args["--action"] == "refreshTags":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
-    removeUnusedTags( args );
+    refreshTags( args );
 
 elif args["--action"] == "autoTagTrans":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
@@ -1243,6 +1313,10 @@ elif args["--action"] == "autoTagTrans":
 elif args["--action"] == "addUser":
     args = verifyArgs( args , required_args = [ '--mongouri', '--user', '--pass' ] )
     addUser( args );
+
+elif args["--action"] == "backfillAutoTags":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    backfillAutoTags( args );
 
 
 
