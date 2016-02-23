@@ -38,40 +38,59 @@ elif [ -z "$mongouri" ]; then
     usage "\$mongouri is not defined"
 fi
 
+#
+# Send account refresh signal to mint
+# 
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action refreshMintAccounts --mintuser xxx --mintpass xxx 
+./mintclient.py --action refreshMintAccounts --mintuser "$mintuser" --mintpass "$mintpass" 
+
+#
+# Sleep for a few seconds to let the mint account refresh above finish
+#
+echo "--------------------------------------------------------------------------------------------"
+echo "sleep 15"
+sleep 15
 
 #
 # Get mint data
 #
-echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpass xxx --mongouri xxx
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpass xxx --mongouri $mongouri
 ./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpass "$mintpass" --mongouri "$mongouri"
 
 #
 # Update account performance (last 7 days, 30 days, and so on)
 #
+echo "--------------------------------------------------------------------------------------------"
 echo ./mintclient.py --action setAccountPerformance --mongouri $mongouri
 ./mintclient.py --action setAccountPerformance --mongouri $mongouri
 
 #
 # Resolve pending trans
 #
+echo "--------------------------------------------------------------------------------------------"
 echo ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
 ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
 
 #
 # Remove unused tags
 #
+echo "--------------------------------------------------------------------------------------------"
 echo ./mintclient.py --action refreshTags --mongouri "$mongouri" 
 ./mintclient.py --action refreshTags --mongouri "$mongouri" 
 
 #
 # Auto tag..
 #
+echo "--------------------------------------------------------------------------------------------"
 echo ./mintclient.py --action autoTagTrans --mongouri "$mongouri" 
 ./mintclient.py --action autoTagTrans --mongouri "$mongouri" 
 
 #
 # Compose email with status update, new trans in need of ACK'ing
 #
+echo "--------------------------------------------------------------------------------------------"
 echo ./mintclient.py --action composeEmailSummary --mongouri=xxx --outputfile=data/email.txt
 ./mintclient.py --action composeEmailSummary --mongouri="$mongouri" --outputfile=data/email.txt
 

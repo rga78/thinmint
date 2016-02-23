@@ -139,15 +139,22 @@ def convertAccounts( accounts ):
 
 
 #
+# send account refresh signal to mint.
+#
+def refreshMintAccounts( args ):
+    print( "refreshMintAccounts: Logging into mint..." )
+    mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
+    print( "refreshMintAccounts: Refreshing accounts..." )
+    mint.initiate_account_refresh()
+
+
+#
 # Retrieve account data from mint
 # @return accounts object
 #
 def getMintAccounts( args ):
     print( "getMintAccounts: Logging into mint..." )
     mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
-
-    print( "getMintAccounts: Refreshing accounts..." )
-    mint.initiate_account_refresh()
 
     print( "getMintAccounts: Getting accounts..." )
     accounts = mint.get_accounts(True)  # True - get extended account detail (takes longer)
@@ -1233,6 +1240,10 @@ args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
 if args["--action"] == "getMintAccounts":
     args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass', '--outputfile' ] )
     doGetMintAccounts( args )
+
+elif args["--action"] == "refreshMintAccounts":
+    args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass' ] )
+    refreshMintAccounts( args )
 
 elif args["--action"] == "getMintTransactions":
     args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass', '--outputfile' ] )
