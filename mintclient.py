@@ -284,6 +284,7 @@ def convertTransaction( trx, regex = re.compile( r'\d\d/\d\d/\d\d' )):
     trx["timestamp"] = getTimestamp( trx["date"] )
     trx["_id"] = trx["id"]
     trx["amountValue"] = getSignedTranAmount( trx )
+    trx["mintMarker"] = 1
     return trx
 
 
@@ -384,7 +385,7 @@ def setHasBeenAcked( trx ):
 # @return a subset of fields, typically for printing.
 #
 def pruneTran( tran ):
-    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'linkedTranIds', 'isResolved', 'tags')}
+    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'linkedTranIds', 'isResolved', 'tags', 'mintMarker')}
 
 #
 # @return a subset of fields, typically for printing.
@@ -705,6 +706,7 @@ def upsertAccountsTimeSeries( db, accounts ):
 # Insert or update mint transaction records into mongo.
 #
 def upsertTransactions( db, trans ):
+    print("upsertTransactions: len(trans)", len(trans))
     for tran in trans:
         db.transactions.update_one( { "_id": tran["_id"] }, 
                                     { "$set": tran }, 
@@ -734,7 +736,11 @@ def importMintDataToMongo( args ):
     upsertAccounts( db, mintAccounts )
     upsertAccountsTimeSeries( db, filterActiveAccounts( mintAccounts ) )
 
-    upsertTransactions( db, mintTrans )
+    if ( len(mintTrans) > 0 ): 
+        # clear the mintMarker field, so we can tell which pending trans in the thinmint db
+        # have been deleted from the mint db.
+        db.transactions.update_many( {}, { "$set": { "mintMarker": 0 } } )
+        upsertTransactions( db, mintTrans )
 
 
 #
@@ -756,11 +762,13 @@ def isMerchantMatch( merchant1, merchant2 ):
 #
 def isFloatWithin( float1, float2, tolerance ):
     if (float1 == float2):
-        return True
+        retMe = True
     elif (float1 > float2):
-        return float1 < (float2 + tolerance)
+        retMe = float1 < (float2 + tolerance)
     elif (float1 < float2):
-        return float1 > (float2 - tolerance)
+        retMe = float1 > (float2 - tolerance)
+    print("isFloatWithin: ", float1, float2, tolerance, retMe )
+    return retMe
 
 
 #
@@ -775,15 +783,15 @@ def currencyToFloat( currencystr ):
 #
 # @return true if the merchant matches and the amount is nearly a match
 #
-def isPendingTranLikelyMatch( pendingTran, tran ):
-    return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and isFloatWithin( currencyToFloat( tran["amount"] ),
-                                                                                           currencyToFloat( pendingTran["amount"] ),
-                                                                                           currencyToFloat( pendingTran["amount"] ) * 0.30 )
+def isPendingTranCloseMatch( pendingTran, tran ):
+    return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and isFloatWithin( tran["amountValue"], 
+                                                                                           pendingTran["amountValue"],
+                                                                                           abs(pendingTran["amountValue"] * 0.30) )
 #
 # @return true if the merchant and amount matches.
 #
-def isPendingTranMatch( pendingTran, tran ):
-    return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and (tran["amount"] == pendingTran["amount"])
+def isPendingTranExactMatch( pendingTran, tran ):
+    return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and (tran["amountValue"] == pendingTran["amountValue"])
 
 
 #
@@ -798,25 +806,22 @@ def linkTranTo( tran1, tran2):
 
 
 #
-# Link the two trans in their linkedTranIds field.
 # Copy the tags from the pendingTran to the clearedTran.
-# Set pendingTran.isMerged = True.
+# Set the clearedTran["pendingTran"] field.
 #
 # @sideeffect: pendingTran and clearedTran are modified
 #
 def linkPendingTran( pendingTran, clearedTran ):
     
-    linkTranTo(pendingTran, clearedTran)
-    linkTranTo(clearedTran, pendingTran)
+    # -rx- linkTranTo(pendingTran, clearedTran)
+    # -rx- linkTranTo(clearedTran, pendingTran)
 
     applyTags( pendingTran, clearedTran )
-    # tags = clearedTran.setdefault('tags',[])
-    # for tag in pendingTran.setdefault('tags',[]):
-    #     if (tag not in tags):
-    #         tags.append(tag)
 
-    pendingTran['isResolved'] = True
-    pendingTran['hasBeenAcked'] = True
+    clearedTran["pendingTran"] = {k: pendingTran.get(k) for k in ('id', 'date', 'merchant', 'amount', 'amountValue')}
+
+    # -rx- pendingTran['isResolved'] = True  # TODO: don't need this if gonna delete mintMarker=0
+    # -rx- pendingTran['hasBeenAcked'] = True
 
     print("linkPendingTran: pendingTran: ", pruneTran(pendingTran) )
     print("linkPendingTran: clearedTran: " , pruneTran(clearedTran) )
@@ -834,27 +839,31 @@ def updateTran( tran, db ):
 #
 # @return a list of clearedTrans that are likely matches for the given pendingTran
 #
-def resolvePendingTran( pendingTran, db ):
+def findMatchingClearedTrans( pendingTran, db ):
 
     trans = db.transactions.find( { "isPending" : False, 
+                                    # TODO "hasBeenAcked": { "$exists": False },   # if the cleared tran has already been ack'ed, don't mess with it
+                                    "pendingTran": { "$exists": False },    # ignore cleared trans that have already been linked to another pendingtran
                                     "fi": pendingTran["fi"], 
                                     "account": pendingTran["account"],
-                                    "timestamp": { "$lte": (pendingTran["timestamp"] + (86400 * 7) ),   # cleared within a week
-                                                   "$gte": pendingTran["timestamp"] }                # TODO: use pendingTran["timestamp"] eventually
-                                  } ) 
+                                    "timestamp": { "$lte": (pendingTran["timestamp"] + (86400 * 10) ),   # cleared within a week or so
+                                                   "$gte": pendingTran["timestamp"] 
+                                                 }              
+                                  },
+                                  sort=[ ("timestamp", 1) ] )   # start with the earliest tran and work our way forward
 
-    print("resolvePendingTran: Searching for potential matches for ", formatNewTranText(pendingTran) , ". Potential match count: ", trans.count());
+    print("findMatchingClearedTrans: Searching for potential matches for ", pruneTran(pendingTran) , ". Potential match count: ", trans.count());
 
-    # first look for exact matches
-    matches = list( filter( lambda tran: isPendingTranMatch(pendingTran, tran), trans ) )
+    # first look for exact matches (merchant and amountValue)
+    matches = list( filter( lambda tran: isPendingTranExactMatch(pendingTran, tran), trans ) )
 
     if ( len(matches) == 0 ): 
-        # no exact matches... look for 'likely' matches..
+        # no exact matches... look for close matches (sometimes the amount changes, e.g. adding a tip)..
         trans.rewind()
-        matches = list( filter( lambda tran: isPendingTranLikelyMatch(pendingTran, tran), trans ) )
+        matches = list( filter( lambda tran: isPendingTranCloseMatch(pendingTran, tran), trans ) )
 
     if ( len(matches) > 0 ): 
-        print("resolvePendingTran: ====> match:", formatNewTranText( matches[0] ) )
+        print("findMatchingClearedTrans: ====> match:", pruneTran( matches[0] ) )
 
     return matches
 
@@ -869,16 +878,24 @@ def resolvePendingTran( pendingTran, db ):
 def resolvePendingTransactions( args ):
     db = getMongoDb( args["--mongouri"] )
 
-    # pendingTrans = db.transactions.find( { "isPending" : True } ) 
     pendingTrans = db.transactions.find( { "isPending" : True, 
-                                           "isResolved": { "$exists": False } } )
+                                           "mintMarker" : 0
+                                           # -rx- "isResolved": { "$exists": False }  # TODO:don't need this if we're gonna delete the resolved tran
+                                         },
+                                         sort=[ ("timestamp", 1) ] )   # start with the earliest tran and work our way forward
 
     for pendingTran in pendingTrans:
-        clearedTrans = resolvePendingTran( pendingTran, db )
-        for clearedTran in clearedTrans:
-            linkPendingTran( pendingTran, clearedTran )
-            updateTran(clearedTran, db)
-        updateTran(pendingTran,db)
+        clearedTrans = findMatchingClearedTrans( pendingTran, db )
+        if clearedTrans:
+            linkPendingTran( pendingTran, clearedTrans[0] )
+            updateTran(clearedTrans[0], db)
+            # -rx- updateTran(pendingTran, db)
+
+    
+    # remove pending trans with mintMarker=0, which means that mint has deleted them.
+    db.transactions.remove(  { "isPending" : True, 
+                               "mintMarker" : 0
+                             } )
 
 
 #
