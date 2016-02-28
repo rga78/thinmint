@@ -385,7 +385,7 @@ def setHasBeenAcked( trx ):
 # @return a subset of fields, typically for printing.
 #
 def pruneTran( tran ):
-    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'linkedTranIds', 'isResolved', 'tags', 'mintMarker')}
+    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'isResolved', 'tags', 'mintMarker')}
 
 #
 # @return a subset of fields, typically for printing.
@@ -707,10 +707,15 @@ def upsertAccountsTimeSeries( db, accounts ):
 #
 def upsertTransactions( db, trans ):
     print("upsertTransactions: len(trans)", len(trans))
+    i = 0
     for tran in trans:
         db.transactions.update_one( { "_id": tran["_id"] }, 
                                     { "$set": tran }, 
                                     upsert=True )
+        i = i + 1
+        if (i % 100 == 0):
+            print("upsertTransactions: upserted", i, "of", len(trans))
+
     print("upsertTransactions: db.transactions.count()=", db.transactions.count())
 
 
@@ -794,15 +799,15 @@ def isPendingTranExactMatch( pendingTran, tran ):
     return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and (tran["amountValue"] == pendingTran["amountValue"])
 
 
-#
-# Add tran1 to tran2['linkedTranIds']
-#
-# @sideeffect: tran2 is modified.
-#
-def linkTranTo( tran1, tran2):
-    linkedTranIds = tran2.setdefault('linkedTranIds',[])
-    if (tran1["_id"] not in linkedTranIds):
-        linkedTranIds.append(tran1["_id"])
+# -rx- #
+# -rx- # Add tran1 to tran2['linkedTranIds']
+# -rx- #
+# -rx- # @sideeffect: tran2 is modified.
+# -rx- #
+# -rx- def linkTranTo( tran1, tran2):
+# -rx-     linkedTranIds = tran2.setdefault('linkedTranIds',[])
+# -rx-     if (tran1["_id"] not in linkedTranIds):
+# -rx-         linkedTranIds.append(tran1["_id"])
 
 
 #
@@ -891,12 +896,16 @@ def resolvePendingTransactions( args ):
             updateTran(clearedTrans[0], db)
             # -rx- updateTran(pendingTran, db)
 
-    
-    # remove pending trans with mintMarker=0, which means that mint has deleted them.
+#
+# Remove thinmint pending trans that have been removed from mint
+# remove pending trans with mintMarker=0, which means that mint has deleted them.
+# 
+def syncRemovedPendingTrans( args ):
+    print("syncRemovedPendingTrans: ")
+    db = getMongoDb( args["--mongouri"] )
     db.transactions.remove(  { "isPending" : True, 
                                "mintMarker" : 0
                              } )
-
 
 #
 # Set timestamp field in all trans that don't have one
@@ -1194,6 +1203,21 @@ def applyAutoTags(tran):
         if ("investment" not in tags):
             tags.append("investment")
 
+#
+# Auto-tag the given tran with the tags from the previous tran
+# from the same merchant.
+#
+def applyPrevTranTags(tran, db):
+    print("applyPrevTranTags: searching for prev tran for tran:", pruneTran(tran))
+    prevTran = db.transactions.find_one( {  "merchant": tran["merchant"],
+                                            "tags": { "$exists": True, "$ne": [] },
+                                            "hasBeenAcked": True
+                                         },
+                                         sort=[ ("timestamp", -1) ] );
+    if prevTran is not None:
+        print("applyPrevTranTags: prev tran:", pruneTran(prevTran)) 
+        applyTags(prevTran, tran);
+
     
 #
 # Auto-tag non-ack'ed trans.
@@ -1203,17 +1227,14 @@ def autoTagTrans( args ):
     trans = getNonAckedTransactions( db )
 
     for tran in trans:
+        alreadyTagged = (len( tran.setdefault("tags",[]) ) > 0)
         applyAutoTags(tran)
-        prevTran = db.transactions.find_one( {  "merchant": tran["merchant"],
-                                                "tags": { "$exists": True, "$ne": [] },
-                                                "hasBeenAcked": True
-                                             },
-                                             sort=[ ("timestamp", -1) ] );
-        if prevTran is not None:
-            print("autoTagTrans: tran:", pruneTran(tran))
-            print("autoTagTrans: prev tran:", pruneTran(prevTran)) 
-            applyTags(prevTran, tran);
-            updateTran(tran, db)
+
+        # don't copy prev tran tags if this tran has already been tagged by the user
+        if (alreadyTagged == False):
+            applyPrevTranTags(tran, db)
+
+        updateTran(tran, db)
 
 #
 # backfill auto tags
@@ -1346,6 +1367,9 @@ elif args["--action"] == "backfillAutoTags":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     backfillAutoTags( args );
 
+elif args["--action"] == "syncRemovedPendingTrans":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    syncRemovedPendingTrans( args );
 
 
 else:

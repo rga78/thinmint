@@ -53,8 +53,8 @@ fi
 # Sleep for a few seconds to let the mint account refresh above finish
 #
 echo "--------------------------------------------------------------------------------------------"
-echo "sleep 15"
-sleep 15
+echo "sleep 25"
+sleep 25
 
 #
 # Get mint data
@@ -110,6 +110,28 @@ echo ./mintclient.py --action autoTagTrans --mongouri "$mongouri"
 if [ $? -ne 0 ]; then
     exit $?
 fi
+
+
+#
+# Remove thinmint pending trans that have been removed from mint
+#
+# Note: we do this after auto-tagging, because sometimes mint creates
+#       a new pending tran record for an existing pending tran and
+#       removes the old pending tran.  These old pending trans won't
+#       be resolved under resolvePendingTransactions (i.e. the tags 
+#       from the old pending tran won't be transfered to the new pending
+#       tran, since the code only resolves to cleared trans). Best we can 
+#       do is let auto-tag copy over the tags from the old pending tran
+#       to the new pending tran.
+#
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action syncRemovedPendingTrans --mongouri "$mongouri" 
+./mintclient.py --action syncRemovedPendingTrans --mongouri "$mongouri" 
+
+if [ $? -ne 0 ]; then
+    exit $?
+fi
+
 
 #
 # Compose email with status update, new trans in need of ACK'ing
