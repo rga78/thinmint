@@ -126,6 +126,7 @@ def removeDatetime( accounts ):
 #
 def convertAccount( account ):
     account["_id"] = account["id"]
+    account["mintMarker"] = 1
 
 
 #
@@ -391,7 +392,7 @@ def pruneTran( tran ):
 # @return a subset of fields, typically for printing.
 #
 def pruneAccount( account ):
-    return {k: account.get(k) for k in ('accountId', 'accountName', 'fiName', 'accountType', 'currentBalance', 'value', 'isActive', 'lastUpdated', 'lastUpdatedInString')}
+    return {k: account.get(k) for k in ('accountId', 'accountName', 'fiName', 'accountType', 'currentBalance', 'value', 'isActive', 'lastUpdated', 'lastUpdatedInString', 'mintMarker')}
 
 
 #
@@ -703,19 +704,22 @@ def upsertAccountsTimeSeries( db, accounts ):
 
 
 #
+# Insert or update mint transaction record into mongo.
+#
+def upsertTransaction(tran, db):
+    print("upsertTransaction: tran=", pruneTran(tran))
+    db.transactions.update_one( { "_id": tran["_id"] }, 
+                                { "$set": tran }, 
+                                upsert=True )
+
+
+#
 # Insert or update mint transaction records into mongo.
 #
 def upsertTransactions( db, trans ):
     print("upsertTransactions: len(trans)", len(trans))
-    i = 0
     for tran in trans:
-        db.transactions.update_one( { "_id": tran["_id"] }, 
-                                    { "$set": tran }, 
-                                    upsert=True )
-        i = i + 1
-        if (i % 100 == 0):
-            print("upsertTransactions: upserted", i, "of", len(trans))
-
+        upsertTransaction(tran, db)
     print("upsertTransactions: db.transactions.count()=", db.transactions.count())
 
 
@@ -738,8 +742,13 @@ def importMintDataToMongo( args ):
     mintAccounts = convertAccounts( getMintAccounts( args ) )
     mintTrans = convertTransactions( getMintTransactions( args ) )
 
-    upsertAccounts( db, mintAccounts )
-    upsertAccountsTimeSeries( db, filterActiveAccounts( mintAccounts ) )
+    if ( len(mintAccounts) > 0 ): 
+        # clear the mintMarker field, so we can tell which accounts in the thinmint db
+        # have been deleted from the mint db.
+        db.accounts.update_many( {}, { "$set": { "mintMarker": 0 } } )
+        upsertAccounts( db, mintAccounts )
+        upsertAccountsTimeSeries( db, filterActiveAccounts( mintAccounts ) )
+
 
     if ( len(mintTrans) > 0 ): 
         # clear the mintMarker field, so we can tell which pending trans in the thinmint db
@@ -851,6 +860,7 @@ def findMatchingClearedTrans( pendingTran, db ):
                                     "pendingTran": { "$exists": False },    # ignore cleared trans that have already been linked to another pendingtran
                                     "fi": pendingTran["fi"], 
                                     "account": pendingTran["account"],
+                                    "mintMarker": 1,
                                     "timestamp": { "$lte": (pendingTran["timestamp"] + (86400 * 10) ),   # cleared within a week or so
                                                    "$gte": pendingTran["timestamp"] 
                                                  }              
@@ -1065,6 +1075,7 @@ def setAccountPerformance( args ):
 #
 def getAccountTransactions( account, db ):
     retMe = db.transactions.find( { "isPending": False,
+                                    "mintMarker": 1,
                                     "fi": account["fiName"],
                                     "account": account["accountName"] } )
     print("getAccountTransactions: account=" + account["accountName"], "trans.count:", retMe.count())
@@ -1114,7 +1125,7 @@ def doesEarlierTranExist( trans, timestamp ):
 
 
 #
-# TODO: this won't be exact.  can't tell which trans were included in the earliest-time-series record
+# Note: this won't be exact.  can't tell which trans were included in the earliest-time-series record
 #       and which weren't.  oh well. include same-day trans or no?  YES.  Assume same-day trans are
 #       already included in the earliest-time-series record. We need to include them in order to compute
 #       the time-series record for 7 days ago (it's like we're rolling back the trans between now and then).
@@ -1124,6 +1135,11 @@ def backfillTimeSeries( account, db ):
     trans = list( getAccountTransactions( account, db ) )
 
     # Note: this algorithm goes *backward* in time... 
+    #       For each account, it starts at the date of the earliest "non-backfill" record,
+    #       then goes back 1-week at a time and computes "backfill" balances (by summing the
+    #       trans for that week) and creates a new "backfilled" record.
+    #       It's ok to run this multiple times against the same account, since each run
+    #       will just overwrite the backfill records from previous runs.
     currRecord = getFirstNonBackfillAccountsTimeSeriesRecord( account, db )
     currTimestamp = currRecord["timestamp"] 
     
@@ -1211,7 +1227,8 @@ def applyPrevTranTags(tran, db):
     print("applyPrevTranTags: searching for prev tran for tran:", pruneTran(tran))
     prevTran = db.transactions.find_one( {  "merchant": tran["merchant"],
                                             "tags": { "$exists": True, "$ne": [] },
-                                            "hasBeenAcked": True
+                                            "hasBeenAcked": True,  # TODO: do i care if it's been acked already? 
+                                            "timestamp": { "$lte": tran["timestamp"] }
                                          },
                                          sort=[ ("timestamp", -1) ] );
     if prevTran is not None:
@@ -1370,6 +1387,7 @@ elif args["--action"] == "backfillAutoTags":
 elif args["--action"] == "syncRemovedPendingTrans":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     syncRemovedPendingTrans( args );
+
 
 
 else:

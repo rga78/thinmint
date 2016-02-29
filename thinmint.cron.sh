@@ -38,23 +38,6 @@ elif [ -z "$mongouri" ]; then
     usage "\$mongouri is not defined"
 fi
 
-#
-# Send account refresh signal to mint
-# 
-echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action refreshMintAccounts --mintuser xxx --mintpass xxx 
-./mintclient.py --action refreshMintAccounts --mintuser "$mintuser" --mintpass "$mintpass" 
-
-if [ $? -ne 0 ]; then
-    exit $?
-fi
-
-#
-# Sleep for a few seconds to let the mint account refresh above finish
-#
-echo "--------------------------------------------------------------------------------------------"
-echo "sleep 25"
-sleep 25
 
 #
 # Get mint data
@@ -127,6 +110,19 @@ fi
 echo "--------------------------------------------------------------------------------------------"
 echo ./mintclient.py --action syncRemovedPendingTrans --mongouri "$mongouri" 
 ./mintclient.py --action syncRemovedPendingTrans --mongouri "$mongouri" 
+
+if [ $? -ne 0 ]; then
+    exit $?
+fi
+
+
+#
+# Send account refresh signal to mint
+# Do this at the end since mint is fucking stupid.
+# 
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action refreshMintAccounts --mintuser xxx --mintpass xxx 
+./mintclient.py --action refreshMintAccounts --mintuser "$mintuser" --mintpass "$mintpass" 
 
 if [ $? -ne 0 ]; then
     exit $?
