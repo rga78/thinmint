@@ -386,7 +386,10 @@ def setHasBeenAcked( trx ):
 # @return a subset of fields, typically for printing.
 #
 def pruneTran( tran ):
-    return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'isResolved', 'tags', 'mintMarker')}
+    if (tran is not None):
+        return {k: tran.get(k) for k in ('id', 'account', 'amount', 'fi', 'date', 'timestamp', 'isPending', 'hasBeenAcked', 'isDebit', 'merchant', 'tags', 'mintMarker')}
+    else:
+        return None
 
 #
 # @return a subset of fields, typically for printing.
@@ -906,6 +909,7 @@ def resolvePendingTransactions( args ):
             updateTran(clearedTrans[0], db)
             # -rx- updateTran(pendingTran, db)
 
+
 #
 # Remove thinmint pending trans that have been removed from mint
 # remove pending trans with mintMarker=0, which means that mint has deleted them.
@@ -916,6 +920,7 @@ def syncRemovedPendingTrans( args ):
     db.transactions.remove(  { "isPending" : True, 
                                "mintMarker" : 0
                              } )
+
 
 #
 # Set timestamp field in all trans that don't have one
@@ -1285,6 +1290,67 @@ def addUser( args ):
                                upsert=True )
 
 
+
+#
+# @return the new copy of the given "marooned" tran
+#
+def findNewTranCopy(tran, db):
+
+    print("findNewTranCopy: tran=", pruneTran(tran))
+    retMe = db.transactions.find_one(  { "mintMarker" : 1,
+                                         "hasBeenAcked": False,
+                                         "isPending": tran["isPending"],
+                                         "account": tran["account"],
+                                         "fi": tran["fi"],
+                                         "amount": tran["amount"],
+                                         "date": tran["date"]
+                                         } )
+    print("findNewTranCopy: retMe=", pruneTran(retMe))
+    return retMe
+
+
+#
+# Transfer tags and other data from fromTran to toTran
+#
+def transferTranData(fromTran, toTran):
+    applyTags(fromTran, toTran)
+    toTran["hasBeenAcked"] = fromTran["hasBeenAcked"]
+    print("transferTranData: toTran:", pruneTran(toTran))
+
+
+#
+# Sometimes mint re-creates an entire account record, and in doing
+# so makes a copy of a bunch of transactions associated with that account,
+# then deletes the old copies of both the account and transactions.
+# 
+# These copied transactions show up as new, non-acked trans in thinmint.
+# The old copies of the trans (the "marooned" trans) still exist in thinmint, 
+# with all their tags still applied.
+#
+# The purpose of this method is to find all those marooned trans, find their
+# corresponding new copy, and transfer the tag data from the marooned tran
+# to the new tran.
+# 
+def syncMaroonedTrans( args ):
+    db = getMongoDb( args["--mongouri"] )
+
+    trans = db.transactions.find(  { "mintMarker" : 0,
+                                     "hasBeenAcked": True,
+                                     "isPending": False } )
+
+    print("syncMaroonedTrans: count: ", trans.count())
+
+    for tran in trans:
+        newTran = findNewTranCopy( tran, db )
+        if newTran is not None:
+            transferTranData( tran, newTran )
+            updateTran( newTran, db )
+
+    print("syncMaroonedTrans: exit")
+
+
+
+
 #
 # main entry point ---------------------------------------------------------------------------
 # 
@@ -1388,6 +1454,9 @@ elif args["--action"] == "syncRemovedPendingTrans":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     syncRemovedPendingTrans( args );
 
+elif args["--action"] == "syncMaroonedTrans":
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    syncMaroonedTrans( args );
 
 
 else:

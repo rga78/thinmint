@@ -50,6 +50,20 @@ if [ $? -ne 0 ]; then
     exit $?
 fi
 
+
+#
+# Sometimes for whatever reason mint makes new copies of tran records.
+# This action attempts to transfer the tags from the old "marooned" copies to the new copies
+#
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action syncMaroonedTrans --mongouri "$mongouri"
+./mintclient.py --action syncMaroonedTrans --mongouri "$mongouri"
+
+if [ $? -ne 0 ]; then
+    exit $?
+fi
+
+
 #
 # Update account performance (last 7 days, 30 days, and so on)
 #
@@ -60,6 +74,7 @@ echo ./mintclient.py --action setAccountPerformance --mongouri $mongouri
 if [ $? -ne 0 ]; then
     exit $?
 fi
+
 
 #
 # Resolve pending trans
@@ -72,6 +87,7 @@ if [ $? -ne 0 ]; then
     exit $?
 fi
 
+
 #
 # Remove unused tags
 #
@@ -82,6 +98,7 @@ echo ./mintclient.py --action refreshTags --mongouri "$mongouri"
 if [ $? -ne 0 ]; then
     exit $?
 fi
+
 
 #
 # Auto tag..
