@@ -26,25 +26,40 @@ fi
 
 source ./.thinmint.env
 
-if [ -z "$mintuser" ]; then
-    usage "\$mintuser is not defined"
-elif [ -z "$mintpass" ]; then
-    usage "\$mintpass is not defined"
-elif [ -z "$gmailuser" ]; then
-    usage "\$gmailuser is not defined"
-elif [ -z "$gmailpass" ]; then
-    usage "\$gmailpass is not defined"
-elif [ -z "$mongouri" ]; then
+# -rx- if [ -z "$gmailuser" ]; then
+# -rx-     usage "\$gmailuser is not defined"
+# -rx- elif [ -z "$gmailpass" ]; then
+# -rx-     usage "\$gmailpass is not defined"
+if [ -z "$mongouri" ]; then
     usage "\$mongouri is not defined"
 fi
 
 
 #
+# Send account refresh signal to mint
+# 
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action refreshMintAccounts --mongouri "$mongouri"
+./mintclient.py --action refreshMintAccounts --mongouri "$mongouri"
+
+if [ $? -ne 0 ]; then
+    exit $?
+fi
+
+
+#
+# Sleep for a while. Give mint a chance to refresh its accounts (which could take a while...)
+# 
+echo "--------------------------------------------------------------------------------------------"
+echo "sleep 300: (started `date`)"
+sleep 300
+
+#
 # Get mint data
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action importMintDataToMongo --mintuser xxx --mintpass xxx --mongouri $mongouri
-./mintclient.py --action importMintDataToMongo --mintuser "$mintuser" --mintpass "$mintpass" --mongouri "$mongouri"
+echo ./mintclient.py --action importMintDataToMongo --mongouri $mongouri
+./mintclient.py --action importMintDataToMongo --mongouri "$mongouri"
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -133,18 +148,6 @@ if [ $? -ne 0 ]; then
 fi
 
 
-#
-# Send account refresh signal to mint
-# Do this at the end since mint is fucking stupid.
-# 
-echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action refreshMintAccounts --mintuser xxx --mintpass xxx 
-./mintclient.py --action refreshMintAccounts --mintuser "$mintuser" --mintpass "$mintpass" 
-
-if [ $? -ne 0 ]; then
-    exit $?
-fi
-
 
 #
 # Compose email with status update, new trans in need of ACK'ing
@@ -165,6 +168,9 @@ fi
 # -rx- 
 # -rx- echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser xxx --gmailpass xxx 
 # -rx- ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
+#
+# add user
+# ./mintclient.py --action addUser --user xx --pass xx --mintuser xx --mintpass xx
 
 
 

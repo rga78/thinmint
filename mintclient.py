@@ -44,8 +44,15 @@ import sys
 import re
 import functools
 
-import hashlib
+#
+# API: https://www.dlitz.net/software/pycrypto/api/current/
+#
+from Crypto.Cipher import AES
+from Crypto import Random
 
+import base64
+import hashlib
+import os
 
 from datetime import date, datetime, timedelta
 
@@ -1270,32 +1277,15 @@ def backfillAutoTags( args ):
 
 
 #
-# Add a user to the DB
-# 
-def addUser( args ):
-
-    db = getMongoDb( args["--mongouri"] )
-
-    user = args["--user"]
-    password = args["--pass"]
-
-    m = hashlib.md5()
-    m.update(password.encode("utf-8"))
-    dig = m.hexdigest()
-
-    print("addUser: user=" + user + ", digest=" + dig);
-
-    db["tm-users"].update_one( { "_id": user }, 
-                               { "$set": { "password": dig } }, 
-                               upsert=True )
-
-
-
-#
 # @return the new copy of the given "marooned" tran
 #
 def findNewTranCopy(tran, db):
 
+    # TODO: what if two trans are identical in every way except tags?
+    #       that means there will be two dups.
+    #       so all we need to do is make sure 1 dup goes to 1 tran and the other goes the other.
+    #       that means we need to mark the "dup'ed" tran as "resolved".  or just delete it altogether.
+    # TODO: not matching on merchant?  sometimes merchant changes?
     print("findNewTranCopy: tran=", pruneTran(tran))
     retMe = db.transactions.find_one(  { "mintMarker" : 1,
                                          "hasBeenAcked": False,
@@ -1338,16 +1328,155 @@ def syncMaroonedTrans( args ):
                                      "hasBeenAcked": True,
                                      "isPending": False } )
 
-    print("syncMaroonedTrans: count: ", trans.count())
+    print("syncMaroonedTrans: marooned tran count:", trans.count())
+
+    syncCount = 0
 
     for tran in trans:
         newTran = findNewTranCopy( tran, db )
         if newTran is not None:
             transferTranData( tran, newTran )
             updateTran( newTran, db )
+            syncCount = syncCount + 1
 
-    print("syncMaroonedTrans: exit")
+    print("syncMaroonedTrans: exit, sync count=", syncCount)
 
+
+#
+# @return the string s, padded on the right to the nearest multiple of bs.
+#         the pad char is the ascii char for the pad length.
+#
+def pad(s, bs):
+    retMe = s + (bs - len(s) % bs) * chr(bs - len(s) % bs)
+    # print("pad: retMe: #" + retMe + "#")
+    return retMe
+
+
+#
+# @param s a string or byte[] previously returned by pad. 
+#          assumes the pad char is equal to the length of the pad
+#
+# @return s with the pad on the right removed.
+#
+def unpad(s):
+    retMe = s[:-ord(s[len(s)-1:])]
+    # print("unpad: retMe:", retMe)
+    return retMe
+
+
+#
+# @param key - key size can be 16, 24, or 32 bytes (128, 192, 256 bits)
+#              You must use the same key when encrypting and decrypting.
+# @param msg - the msg to encrypt
+#
+# @return base64-encoded ciphertext
+#
+def encrypt(key, msg):
+    msg = pad(msg, AES.block_size)
+
+    #
+    # iv is like a salt.  it's used for randomizing the encryption
+    # such that the same input msg isn't encoded to the same cipher text
+    # (so long as you use a different iv).  The iv is then prepended to
+    # the ciphertext.  Before decrypting, you must remove the iv and only
+    # decrypt the ciphertext.
+    #
+    # Note: AES.block_size is always 16 bytes (128 bits)
+    #
+    iv = Random.new().read(AES.block_size)
+
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+
+    #
+    # Note: the iv is prepended to the encrypted message
+    # encryptedMsg is a base64-encoded byte[] 
+    # 
+    return base64.b64encode(iv + cipher.encrypt(msg))
+
+
+#
+# @param key - key size can be 16, 24, or 32 bytes (128, 192, 256 bits)
+#              You must use the same key when encrypting and decrypting.
+# @param encryptedMsg - the msg to decrypt (base64-encoded), previously returned 
+#                       by encrypt.  First 16 bytes is the iv (salt)
+#
+def decrypt(key, encryptedMsg):
+    enc = base64.b64decode(encryptedMsg)
+    iv = enc[:AES.block_size]
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    return unpad(cipher.decrypt(enc[AES.block_size:])).decode('utf-8')
+
+
+#
+# TODO: not strong enough.  need salt and multiple hashes
+# @return a hexdigest representing the hashed password
+#
+def hashPassword( password ):
+    m = hashlib.md5()
+    m.update(password.encode("utf-8"))
+    return m.hexdigest()
+
+
+#
+# @return AES-encrypted mintCred
+#
+def encryptMintCred( mintCred ):
+    key = os.environ['TM_AES_KEY'].encode('utf-8')
+    return encrypt(key, mintCred).decode('utf-8')
+
+
+#
+# @return AES-derypted mintCred
+#
+def decryptMintCred( encMintCred ):
+    key = os.environ['TM_AES_KEY'].encode('utf-8')
+    return decrypt(key, encMintCred)
+
+
+#
+# Add a user to the DB
+# 
+def addUser( args ):
+
+    db = getMongoDb( args["--mongouri"] )
+
+    user = args["--user"]
+    password = args["--pass"]
+    hashedPassword = hashPassword( password )
+
+    mintCred = args['--mintuser'] + ":" + args['--mintpass']
+    encMintCred = encryptMintCred(mintCred)
+
+    print("addUser: user=" + user + ", hashedPassword=" + hashedPassword + ", encMintCred=" + encMintCred);
+
+    db["tm-users"].update_one( { "_id": user }, 
+                               { "$set": { "password": hashedPassword,
+                                           "mintCred": encMintCred } 
+                               }, 
+                               upsert=True )
+
+#
+# Set fields --mintuser and --mintpass into the given args object.
+# The mint creds are pulled from the DB
+#
+# @return args
+#
+def addMintCreds( user, args ):
+
+    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    db = getMongoDb( args["--mongouri"] )
+    userRecord = db["tm-users"].find_one( { "_id": user } )
+
+    if (userRecord is not None):
+        print("addMintCreds: userRecord:", userRecord)
+
+        mintCred = decryptMintCred( userRecord["mintCred"] )
+        args["--mintuser"] = mintCred.split(":",1)[0]
+        args["--mintpass"] = mintCred.split(":",1)[1]
+        
+        # print("addMintCreds: mintCred:", mintCred, "args:", args)
+
+    return args
 
 
 
@@ -1357,12 +1486,14 @@ def syncMaroonedTrans( args ):
 args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
 # -rx- print("main: verified args=", args)
 
+user="ilana.bram@gmail.com"
 
 if args["--action"] == "getMintAccounts":
     args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass', '--outputfile' ] )
     doGetMintAccounts( args )
 
 elif args["--action"] == "refreshMintAccounts":
+    args = addMintCreds( user, args)
     args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass' ] )
     refreshMintAccounts( args )
 
@@ -1407,6 +1538,7 @@ elif args["--action"] == "sendEmailSummary":
     sendEmailSummary( args )
 
 elif args["--action"] == "importMintDataToMongo":
+    args = addMintCreds( user, args)
     args = verifyArgs( args , required_args = [ '--mongouri', '--mintuser', '--mintpass' ] )
     importMintDataToMongo( args )
 
@@ -1443,8 +1575,12 @@ elif args["--action"] == "autoTagTrans":
     autoTagTrans( args );
 
 elif args["--action"] == "addUser":
-    args = verifyArgs( args , required_args = [ '--mongouri', '--user', '--pass' ] )
+    args = verifyArgs( args , required_args = [ '--mongouri', '--user', '--pass', '--mintuser', '--mintpass' ] )
     addUser( args );
+
+elif args["--action"] == "addMintCreds":
+    args = verifyArgs( args , required_args = [ '--mongouri', '--user' ] )
+    addMintCreds( args['--user'], args );
 
 elif args["--action"] == "backfillAutoTags":
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
