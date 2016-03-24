@@ -526,7 +526,7 @@ def getActiveAccounts( db ):
 #
 def doComposeEmailSummary( args ) : 
 
-    db = getMongoDb( args["--mongouri"]  )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     # read trans that have yet to be acked.
     trans = getNonAckedTransactions( db )
@@ -597,14 +597,54 @@ def getMongoDb( mongoUri ):
     return mongoClient[dbname]
 
 
+
+#
+# My first Python class!
+# 
+class UserDb:
+
+    #
+    # CTOR
+    #
+    def __init__( self, mongoDb, userId ):
+        self.userId = userId
+        self.db = mongoDb
+
+        for collectionName in ["tags", "accounts", "accountsTimeSeries", "transactions", "savedqueries" ]:
+            setattr(self, collectionName, self.getUserCollection(mongoDb, userId, collectionName))
+
+    #
+    # @return The user-specific collection
+    #
+    def getUserCollection(self, db, userId, collectionName):
+        return db["/tm/" + userId + "/" + collectionName]
+
+
+#
+# @return userDb object, where collections are routed to the user-specific collection
+#
+def getUserDb( db, userId ):
+    return UserDb(db, userId)
+
+#
+# verify getUserDb works.
+# 
+def checkUserDb(args):
+
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
+    print("checkUserDb db: ", db)
+    print("checkUserDb db.accounts: ", db.accounts)
+    print("checkUserDb db.accountsTimeSeries: ", db.accountsTimeSeries)
+
+
 #
 # Upsert account record.
 #
 def upsertAccount( db, account ):
     print("upsertAccount: account=", pruneAccount(account))
     db.accounts.update_one( { "_id": account["_id"] }, 
-                            { "$set": account }, 
-                            upsert=True )
+                                { "$set": account }, 
+                                upsert=True )
 
 
 #
@@ -741,13 +781,28 @@ def filterActiveAccounts( accounts ):
 
 
 #
+# Set the given user at args["--user"]
+# @return args
+#
+def setUser(args, user):
+    args["--user"] = user
+    return args
+
+#
+# @return the '--user' field from the given args
+# 
+def getUser(args):
+    return args["--user"]
+
+
+#
 # Download all accounts and trans from mint.
 # Push mint accounts into db.accounts
 #   Note: existing account data will be overwritten.  This is OK since I don't intend to modify ANY mint data.
 #
 def importMintDataToMongo( args ):
     # make sure we can reach mongo first
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     mintAccounts = convertAccounts( getMintAccounts( args ) )
     mintTrans = convertTransactions( getMintTransactions( args ) )
@@ -901,7 +956,7 @@ def findMatchingClearedTrans( pendingTran, db ):
 # Mark pendingTran resolved.
 #
 def resolvePendingTransactions( args ):
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     pendingTrans = db.transactions.find( { "isPending" : True, 
                                            "mintMarker" : 0
@@ -913,7 +968,7 @@ def resolvePendingTransactions( args ):
         clearedTrans = findMatchingClearedTrans( pendingTran, db )
         if clearedTrans:
             linkPendingTran( pendingTran, clearedTrans[0] )
-            updateTran(clearedTrans[0], db)
+            updateTran(clearedTrans[0], db)   # TODO
             # -rx- updateTran(pendingTran, db)
 
 
@@ -923,7 +978,7 @@ def resolvePendingTransactions( args ):
 # 
 def syncRemovedPendingTrans( args ):
     print("syncRemovedPendingTrans: ")
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
     db.transactions.remove(  { "isPending" : True, 
                                "mintMarker" : 0
                              } )
@@ -933,7 +988,7 @@ def syncRemovedPendingTrans( args ):
 # Set timestamp field in all trans that don't have one
 #
 def setTransactionTimestamps( args ):
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     trans = db.transactions.find( { "timestamp": { "$exists": False } } )
 
@@ -941,13 +996,13 @@ def setTransactionTimestamps( args ):
 
     for tran in trans:
         tran["timestamp"] = getTimestamp( tran["date"] )
-        updateTran(tran, db)
+        updateTran(tran, db)   # TODO
 
 #
 # Set transaction amountValue
 #
 def setTransactionAmountValues( args ):
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     trans = db.transactions.find( { "amountValue": { "$exists": False } } )
 
@@ -955,7 +1010,7 @@ def setTransactionAmountValues( args ):
 
     for tran in trans:
         tran["amountValue"] = getSignedTranAmount( tran )
-        updateTran(tran, db)
+        updateTran(tran, db)   # TODO
 
 
 #
@@ -963,7 +1018,7 @@ def setTransactionAmountValues( args ):
 #
 def setAccountsTimeSeriesTimestamps( args ):
 
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     records = db.accountsTimeSeries.find( { "timestamp": { "$exists": False } } )
 
@@ -1057,7 +1112,7 @@ def updateAccountPerformance( account, fieldName, begindate, db ):
             account[fieldName] = 0
 
     print("updateAccountPerformance: account=", pruneAccount(account))
-    upsertAccount(db, account)
+    upsertAccount(db, account)  # TODO
 
 
 #
@@ -1066,7 +1121,8 @@ def updateAccountPerformance( account, fieldName, begindate, db ):
 # 
 def setAccountPerformance( args ):
 
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
+
     accounts = getActiveAccounts(db)
 
     # delta = timedelta( days=int(args["--daysago"]) )
@@ -1161,7 +1217,7 @@ def backfillTimeSeries( account, db ):
 
         weekAgoRecord = createBackfillAccountTimeSeriesRecord( account, weekAgoTimestamp, currRecord, amount )
 
-        upsertAccountsTimeSeriesRecord( db, weekAgoRecord )
+        upsertAccountsTimeSeriesRecord( db, weekAgoRecord )  # TODO
         currTimestamp = weekAgoTimestamp
         currRecord = weekAgoRecord
 
@@ -1179,7 +1235,7 @@ def backfillTimeSeries( account, db ):
 # 
 def backfillAccountsTimeSeries( args ):
 
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
     accounts = getActiveBankAndCreditAccounts(db)
 
     for account in accounts:
@@ -1192,7 +1248,7 @@ def backfillAccountsTimeSeries( args ):
 # 
 def refreshTags( args ):
 
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
     trans = db.transactions.find({ "tags": { "$exists": True, "$ne": [] } }, projection= { "tags": True } );
 
     print("refreshTags: trans.count=", trans.count())
@@ -1252,7 +1308,7 @@ def applyPrevTranTags(tran, db):
 # Auto-tag non-ack'ed trans.
 #
 def autoTagTrans( args ):
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
     trans = getNonAckedTransactions( db )
 
     for tran in trans:
@@ -1263,17 +1319,17 @@ def autoTagTrans( args ):
         if (alreadyTagged == False):
             applyPrevTranTags(tran, db)
 
-        updateTran(tran, db)
+        updateTran(tran, db)   # TODO
 
 #
 # backfill auto tags
 #
 def backfillAutoTags( args ):
-    db = getMongoDb( args["--mongouri"] )
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
     trans = db.transactions.find({}, projection={ "_id": True, "txnType": True, "tags": True } );
     for tran in trans:
         applyAutoTags(tran)
-        updateTran(tran, db)
+        updateTran(tran, db)   # TODO
 
 
 #
@@ -1287,14 +1343,14 @@ def findNewTranCopy(tran, db):
     #       that means we need to mark the "dup'ed" tran as "resolved".  or just delete it altogether.
     # TODO: not matching on merchant?  sometimes merchant changes?
     print("findNewTranCopy: tran=", pruneTran(tran))
-    retMe = db.transactions.find_one(  { "mintMarker" : 1,
-                                         "hasBeenAcked": False,
-                                         "isPending": tran["isPending"],
-                                         "account": tran["account"],
-                                         "fi": tran["fi"],
-                                         "amount": tran["amount"],
-                                         "date": tran["date"]
-                                         } )
+    retMe = db.transactions.find_one(  {     "mintMarker" : 1,
+                                             "hasBeenAcked": False,
+                                             "isPending": tran["isPending"],
+                                             "account": tran["account"],
+                                             "fi": tran["fi"],
+                                             "amount": tran["amount"],
+                                             "date": tran["date"]
+                                       } )
     print("findNewTranCopy: retMe=", pruneTran(retMe))
     return retMe
 
@@ -1322,7 +1378,8 @@ def transferTranData(fromTran, toTran):
 # to the new tran.
 # 
 def syncMaroonedTrans( args ):
-    db = getMongoDb( args["--mongouri"] )
+
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     trans = db.transactions.find(  { "mintMarker" : 0,
                                      "hasBeenAcked": True,
@@ -1449,11 +1506,11 @@ def addUser( args ):
 
     print("addUser: user=" + user + ", hashedPassword=" + hashedPassword + ", encMintCred=" + encMintCred);
 
-    db["tm-users"].update_one( { "_id": user }, 
-                               { "$set": { "password": hashedPassword,
-                                           "mintCred": encMintCred } 
-                               }, 
-                               upsert=True )
+    db["/tm/users"].update_one( { "_id": user }, 
+                                { "$set": { "password": hashedPassword,
+                                            "mintCred": encMintCred } 
+                                }, 
+                                upsert=True )
 
 #
 # Set fields --mintuser and --mintpass into the given args object.
@@ -1465,7 +1522,7 @@ def addMintCreds( user, args ):
 
     args = verifyArgs( args , required_args = [ '--mongouri' ] )
     db = getMongoDb( args["--mongouri"] )
-    userRecord = db["tm-users"].find_one( { "_id": user } )
+    userRecord = db["/tm/users"].find_one( { "_id": user } )
 
     if (userRecord is not None):
         print("addMintCreds: userRecord:", userRecord)
@@ -1473,11 +1530,11 @@ def addMintCreds( user, args ):
         mintCred = decryptMintCred( userRecord["mintCred"] )
         args["--mintuser"] = mintCred.split(":",1)[0]
         args["--mintpass"] = mintCred.split(":",1)[1]
+        args["--user"] = user;
         
         # print("addMintCreds: mintCred:", mintCred, "args:", args)
 
     return args
-
 
 
 #
@@ -1486,6 +1543,7 @@ def addMintCreds( user, args ):
 args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
 # -rx- print("main: verified args=", args)
 
+# TODO: read user list from DB.
 user="ilana.bram@gmail.com"
 
 if args["--action"] == "getMintAccounts":
@@ -1530,7 +1588,8 @@ elif args["--action"] == "composeEmailSummary_OLD":
     doComposeEmailSummary_OLD( args )
 
 elif args["--action"] == "composeEmailSummary":
-    args = verifyArgs( args , required_args = [ '--mongouri', '--outputfile' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri', '--outputfile' ] )
     doComposeEmailSummary( args )
 
 elif args["--action"] == "sendEmailSummary":
@@ -1539,39 +1598,47 @@ elif args["--action"] == "sendEmailSummary":
 
 elif args["--action"] == "importMintDataToMongo":
     args = addMintCreds( user, args)
-    args = verifyArgs( args , required_args = [ '--mongouri', '--mintuser', '--mintpass' ] )
+    args = verifyArgs( args , required_args = [ '--mongouri', '--user', '--mintuser', '--mintpass' ] )
     importMintDataToMongo( args )
 
 elif args["--action"] == "resolvePendingTransactions":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     resolvePendingTransactions( args )
 
 elif args["--action"] == "setTransactionTimestamps":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setTransactionTimestamps( args )
 
 elif args["--action"] == "setTransactionAmountValues":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setTransactionAmountValues( args )
 
 elif args["--action"] == "setAccountsTimeSeriesTimestamps":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setAccountsTimeSeriesTimestamps( args )
 
 elif args["--action"] == "setAccountPerformance":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setAccountPerformance( args );
 
 elif args["--action"] == "backfillAccountsTimeSeries":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     backfillAccountsTimeSeries( args );
 
 elif args["--action"] == "refreshTags":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = ['--user',  '--mongouri' ] )
     refreshTags( args );
 
 elif args["--action"] == "autoTagTrans":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     autoTagTrans( args );
 
 elif args["--action"] == "addUser":
@@ -1583,16 +1650,25 @@ elif args["--action"] == "addMintCreds":
     addMintCreds( args['--user'], args );
 
 elif args["--action"] == "backfillAutoTags":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     backfillAutoTags( args );
 
 elif args["--action"] == "syncRemovedPendingTrans":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     syncRemovedPendingTrans( args );
 
 elif args["--action"] == "syncMaroonedTrans":
-    args = verifyArgs( args , required_args = [ '--mongouri' ] )
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     syncMaroonedTrans( args );
+
+elif args["--action"] == "checkUserDb":
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
+    checkUserDb( args );
+
 
 
 else:

@@ -78,6 +78,7 @@ if [ $? -ne 0 ]; then
     exit $?
 fi
 
+# TODO: backfill
 
 #
 # Update account performance (last 7 days, 30 days, and so on)
