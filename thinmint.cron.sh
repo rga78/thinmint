@@ -78,7 +78,9 @@ if [ $? -ne 0 ]; then
     exit $?
 fi
 
-# TODO: backfill
+# TODO: backfill timeseries
+# ./mintclient.py --action backfillAccountsTimeSeries --mongouri $mongouri
+# ./mintclient.py --action backfillSummaryTimeSeries --mongouri $mongouri
 
 #
 # Update account performance (last 7 days, 30 days, and so on)

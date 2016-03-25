@@ -278,7 +278,7 @@ def convertDate( datestr, regex = re.compile( r'\d\d/\d\d/\d\d' ) ):
 #
 # @param datestr in the format mm/dd/yy
 # 
-# @return timestamp (secons since epoch)
+# @return timestamp (seconds since epoch)
 #
 def getTimestamp( datestr ): 
     return int( datetime.strptime( datestr, "%m/%d/%y").timestamp() )
@@ -516,7 +516,8 @@ def getActiveBankAndCreditAccounts( db ):
 # @return active accounts
 #
 def getActiveAccounts( db ):
-    accounts = db.accounts.find( { "isActive" : True } )
+    accounts = db.accounts.find( { "isActive" : True,
+                                   "mintMarker": 1 } )
     print("getActiveAccounts: Found {} active bank/credit accounts out of {}".format( accounts.count(), db.accounts.count() ) )
     return accounts
 
@@ -668,7 +669,13 @@ def parseDateFromAccountsTimeSeriesId( record ):
 # @return str(account["_id"]) + datestr
 # 
 def getAccountTimeSeriesId( account, datestr ):
-    return str(account["_id"]) + "." + datestr
+    return getAccountIdTimeSeriesId( account["_id"], datestr)
+
+#
+# @return str(account["_id"]) + datestr
+# 
+def getAccountIdTimeSeriesId( accountId, datestr ):
+    return str(accountId) + "." + datestr
 
 
 #
@@ -710,6 +717,74 @@ def createAccountTimeSeriesRecord( account ):
     return retMe
 
 #
+# @param accountId
+# @param accountName
+# @param beforeDate the date for the record
+# @param value net worth on this date
+#
+# @return an accountTimeSeries record for the given data
+# 
+def createSummaryTimeSeriesRecord( accountId, accountName, beforeDate, value ):
+    datestr = beforeDate.strftime( "%m/%d/%y" )
+
+    retMe = {}
+    retMe["accountId"] = accountId
+    retMe["accountName"] = accountName
+    retMe["date"] = datestr
+    retMe["timestamp"] = int( beforeDate.timestamp() )
+    retMe["value"] = value 
+    retMe["currentBalance"] = value
+    retMe["_id"] = getAccountIdTimeSeriesId( accountId, datestr ) 
+
+    print( "createSummaryTimeSeriesRecord: ", retMe )
+    return retMe
+
+#
+# @param accountId
+# @param accountName
+# @param beforeDate the date for the record
+# @param value net worth on this date
+#
+# @return an accountTimeSeries record for the given data
+# 
+def createBackfillSummaryTimeSeriesRecord( accountId, accountName, beforeDate, value ):
+    retMe = createSummaryTimeSeriesRecord(accountId, accountName, beforeDate, value)
+    retMe["isBackfill"] = True
+    print( "createBackfillSummaryTimeSeriesRecord: ", retMe )
+    return retMe
+
+
+#
+# @param beforeDate the date for the record
+# @param netWorth net worth on this date
+#
+# @return an accountTimeSeries record for the given data
+# 
+def createNetWorthTimeSeriesRecord( beforeDate, value ):
+    return createSummaryTimeSeriesRecord( -1, "Net Worth", beforeDate, value)
+
+
+#
+# @param beforeDate the date for the record
+# @param value the value on this date
+#
+# @return an accountTimeSeries record for the given data
+# 
+def createBankAndCreditTimeSeriesRecord( beforeDate, value ):
+    return createSummaryTimeSeriesRecord( -2, "Bank & Credit Accounts", beforeDate, value)
+
+
+#
+# @param beforeDate the date for the record
+# @param value the value on this date
+#
+# @return an accountTimeSeries record for the given data
+# 
+def createNonBankAndCreditTimeSeriesRecord( beforeDate, value ):
+    return createSummaryTimeSeriesRecord( -3, "Investment & Other Accounts", beforeDate, value)
+
+
+#
 # @param account
 # @param timestamp the new record's timestamp
 # @param nextRecord the next/subsequent/later time-series record for this account
@@ -742,6 +817,50 @@ def upsertAccountsTimeSeriesRecord( db, record ):
                                       upsert=True )
 
 #
+# @return the sum of all account values.
+# 
+def sumAccountValues(accounts):
+    retMe = functools.reduce( lambda memo, account: memo + ( account["value"] if account is not None else 0 ),
+                              accounts,
+                              0 )
+    print("sumAccountValues: ", retMe )
+    return retMe
+
+
+#
+# Insert or update account time-series records into mongo.
+# Time-series records keep track of account balance from day-to-day.
+#
+def upsertSummaryTimeSeries( db, accounts ):
+
+    # Net worth
+    netWorth = sumAccountValues( accounts )
+    netWorthRecord = createNetWorthTimeSeriesRecord( datetime.today(), netWorth )
+    upsertAccountsTimeSeriesRecord( db, netWorthRecord )
+
+    # Bank/Credit accounts
+    bankAndCreditValue = sumAccountValues( filterBankAndCreditAccounts(accounts) )
+    bankAndCreditRecord = createBankAndCreditTimeSeriesRecord( datetime.today(), bankAndCreditValue )
+    upsertAccountsTimeSeriesRecord( db, bankAndCreditRecord)
+
+    # Investment/other accounts
+    nonBankAndCreditValue = sumAccountValues( filterNonBankAndCreditAccounts(accounts) )
+    nonBankAndCreditRecord = createNonBankAndCreditTimeSeriesRecord( datetime.today(), nonBankAndCreditValue )
+    upsertAccountsTimeSeriesRecord( db, nonBankAndCreditRecord)
+
+    print("upsertSummaryTimeSeries: db.accountsTimeSeries.count()=", db.accountsTimeSeries.count())
+
+#
+# Insert or update account time-series records into mongo.
+# Time-series records keep track of account balance from day-to-day.
+#
+def doUpsertSummaryTimeSeries( args ):
+
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
+    upsertSummaryTimeSeries( db, list(getActiveAccounts(db)) )
+
+
+#
 # Insert or update account time-series records into mongo.
 # Time-series records keep track of account balance from day-to-day.
 #
@@ -749,6 +868,8 @@ def upsertAccountsTimeSeries( db, accounts ):
     for account in accounts:
         record = createAccountTimeSeriesRecord( account )
         upsertAccountsTimeSeriesRecord( db, record )
+
+    upsertSummaryTimeSeries(db, accounts)
 
     print("upsertAccountsTimeSeries: db.accountsTimeSeries.count()=", db.accountsTimeSeries.count())
 
@@ -778,6 +899,18 @@ def upsertTransactions( db, trans ):
 #
 def filterActiveAccounts( accounts ):
     return list( filter(lambda act: act["isActive"], accounts) ) 
+
+#
+# @return subset of accounts of type "credit" or "bank"
+#
+def filterBankAndCreditAccounts( accounts ):
+    return list( filter(lambda account: account["accountType"] in [ "credit", "bank" ], accounts) ) 
+
+#
+# @return subset of accounts NOT of type "credit" or "bank"
+#
+def filterNonBankAndCreditAccounts( accounts ):
+    return list( filter(lambda account: account["accountType"] not in [ "credit", "bank" ], accounts) ) 
 
 
 #
@@ -810,7 +943,7 @@ def importMintDataToMongo( args ):
     if ( len(mintAccounts) > 0 ): 
         # clear the mintMarker field, so we can tell which accounts in the thinmint db
         # have been deleted from the mint db.
-        db.accounts.update_many( {}, { "$set": { "mintMarker": 0 } } )
+        db.accounts.update_many( {}, { "$set": { "mintMarker": 0, "isActive": False } } )
         upsertAccounts( db, mintAccounts )
         upsertAccountsTimeSeries( db, filterActiveAccounts( mintAccounts ) )
 
@@ -873,17 +1006,6 @@ def isPendingTranExactMatch( pendingTran, tran ):
     return isMerchantMatch( pendingTran["merchant"], tran["merchant"] ) and (tran["amountValue"] == pendingTran["amountValue"])
 
 
-# -rx- #
-# -rx- # Add tran1 to tran2['linkedTranIds']
-# -rx- #
-# -rx- # @sideeffect: tran2 is modified.
-# -rx- #
-# -rx- def linkTranTo( tran1, tran2):
-# -rx-     linkedTranIds = tran2.setdefault('linkedTranIds',[])
-# -rx-     if (tran1["_id"] not in linkedTranIds):
-# -rx-         linkedTranIds.append(tran1["_id"])
-
-
 #
 # Copy the tags from the pendingTran to the clearedTran.
 # Set the clearedTran["pendingTran"] field.
@@ -892,9 +1014,6 @@ def isPendingTranExactMatch( pendingTran, tran ):
 #
 def linkPendingTran( pendingTran, clearedTran ):
     
-    # -rx- linkTranTo(pendingTran, clearedTran)
-    # -rx- linkTranTo(clearedTran, pendingTran)
-
     applyTags( pendingTran, clearedTran )
 
     clearedTran["pendingTran"] = {k: pendingTran.get(k) for k in ('id', 'date', 'merchant', 'amount', 'amountValue')}
@@ -968,7 +1087,7 @@ def resolvePendingTransactions( args ):
         clearedTrans = findMatchingClearedTrans( pendingTran, db )
         if clearedTrans:
             linkPendingTran( pendingTran, clearedTrans[0] )
-            updateTran(clearedTrans[0], db)   # TODO
+            updateTran(clearedTrans[0], db)   
             # -rx- updateTran(pendingTran, db)
 
 
@@ -996,7 +1115,7 @@ def setTransactionTimestamps( args ):
 
     for tran in trans:
         tran["timestamp"] = getTimestamp( tran["date"] )
-        updateTran(tran, db)   # TODO
+        updateTran(tran, db)   
 
 #
 # Set transaction amountValue
@@ -1010,7 +1129,7 @@ def setTransactionAmountValues( args ):
 
     for tran in trans:
         tran["amountValue"] = getSignedTranAmount( tran )
-        updateTran(tran, db)   # TODO
+        updateTran(tran, db)   
 
 
 #
@@ -1032,15 +1151,15 @@ def setAccountsTimeSeriesTimestamps( args ):
                                           { "$set": record } )
 
 
-# -rx- #
-# -rx- # @return the first record in accountsTimeSeries for the given account after the given date
-# -rx- #
-# -rx- def getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db ):
-# -rx-     retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
-# -rx-                                               "timestamp": { "$gte": begindate.timestamp() } },
-# -rx-                                             sort=[ ("timestamp", 1) ] )
-# -rx-     print("getFirstAccountTimeSeriesRecordAfterDate: begindate:", begindate.timestamp(), "retMe:", retMe )
-# -rx-     return retMe 
+#
+# @return the first record in accountsTimeSeries for the given account after the given date
+#
+def getFirstAccountTimeSeriesRecordAfterDate( account, begindate, db ):
+    retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"],
+                                              "timestamp": { "$gte": begindate.timestamp() } },
+                                            sort=[ ("timestamp", 1) ] )
+    print("getFirstAccountTimeSeriesRecordAfterDate: begindate:", begindate.timestamp(), "retMe:", retMe )
+    return retMe 
 
 #
 # @return the first record in accountsTimeSeries for the given account BEFORE the given date
@@ -1053,14 +1172,14 @@ def getPreviousAccountTimeSeriesRecordBeforeDate( account, begindate, db ):
     return retMe 
 
 
-# -rx- #
-# -rx- # @return the last record in accountsTimeSeries for the given account 
-# -rx- #
-# -rx- def getLastAccountTimeSeriesRecord( account, db ):
-# -rx-     retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"] },
-# -rx-                                             sort=[ ("timestamp", -1) ] )
-# -rx-     print("getLastAccountTimeSeriesRecord: retMe:", retMe )
-# -rx-     return retMe 
+#
+# @return the last record in accountsTimeSeries for the given account 
+#
+def getLastAccountTimeSeriesRecord( account, db ):
+    retMe = db.accountsTimeSeries.find_one( { "accountId": account["accountId"] },
+                                            sort=[ ("timestamp", -1) ] )
+    print("getLastAccountTimeSeriesRecord: retMe:", retMe )
+    return retMe 
 
 
 #
@@ -1112,7 +1231,7 @@ def updateAccountPerformance( account, fieldName, begindate, db ):
             account[fieldName] = 0
 
     print("updateAccountPerformance: account=", pruneAccount(account))
-    upsertAccount(db, account)  # TODO
+    upsertAccount(db, account)  
 
 
 #
@@ -1206,7 +1325,8 @@ def backfillTimeSeries( account, db ):
     #       For each account, it starts at the date of the earliest "non-backfill" record,
     #       then goes back 1-week at a time and computes "backfill" balances (by summing the
     #       trans for that week) and creates a new "backfilled" record.
-    #       It's ok to run this multiple times against the same account, since each run
+    #
+    #       Note: It's ok to run this multiple times against the same account, since each run
     #       will just overwrite the backfill records from previous runs.
     currRecord = getFirstNonBackfillAccountsTimeSeriesRecord( account, db )
     currTimestamp = currRecord["timestamp"] 
@@ -1217,20 +1337,85 @@ def backfillTimeSeries( account, db ):
 
         weekAgoRecord = createBackfillAccountTimeSeriesRecord( account, weekAgoTimestamp, currRecord, amount )
 
-        upsertAccountsTimeSeriesRecord( db, weekAgoRecord )  # TODO
+        upsertAccountsTimeSeriesRecord( db, weekAgoRecord )  
         currTimestamp = weekAgoTimestamp
         currRecord = weekAgoRecord
 
 
 #
-# Backfill account performance fields ("7daysago", "30daysago", "90daysago", "365daysago").
+# @return an account object wrapped around the given accountId
+#
+def wrapAccountId(accountId):
+    retMe = {}
+    retMe["accountId"] = accountId
+    return retMe
+
+
+#
+# @return the sum value of the previous accountTimeSeries record prior to the given date
+#         for all the given accounts.
+#
+def getPrevTimeSeriesRecordsSumValue( accounts, beforeDate, db ):
+    prevTimeSeriesRecords = map( lambda account: getPreviousAccountTimeSeriesRecordBeforeDate( account, beforeDate, db), accounts )
+    return sumAccountValues( prevTimeSeriesRecords )
+
+
+#
+# backfill summary timeseries (net worth, bank and credit, investment and other)
+#
+# Start at currDate = today
+#   find prev accountTimeSeries entry prior to currDate for each account 
+#   create timeseries recourd by summing balances
+#   currDate = currDate - 7 days.
+# Loop until no more accountTimeSeries records exist earlier than the given date
+# 
+# 
+def backfillSummaryTimeSeries( args ):
+
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
+
+    # only worry about active accounts for the backfill.
+    accounts = list(getActiveAccounts(db))
+
+    # Get earliest timeseries timestamp
+    firstTimeSeriesRecord = db.accountsTimeSeries.find_one({},
+                                                           sort=[ ("timestamp", 1) ] )
+    firstTimestamp_s = firstTimeSeriesRecord["timestamp"]
+    print("backfillSummaryTimeSeries: firstTimestamp_s=", firstTimestamp_s)
+
+    # start from a week before the earliest non-backfill record, and work our way backwards.
+    currRecord = getFirstNonBackfillAccountsTimeSeriesRecord( wrapAccountId(-1), db )
+    currTimestamp_s = currRecord["timestamp"] - (7 * 86400)
+    
+    while (currTimestamp_s >= firstTimestamp_s ):     
+        beforeDate = datetime.fromtimestamp(currTimestamp_s)
+
+        sumValue = getPrevTimeSeriesRecordsSumValue( accounts, beforeDate, db )
+        record = createBackfillSummaryTimeSeriesRecord( -1, "Net Worth", beforeDate, sumValue)
+        upsertAccountsTimeSeriesRecord( db, record )  
+
+        sumValue = getPrevTimeSeriesRecordsSumValue( filterBankAndCreditAccounts(accounts), beforeDate, db )
+        record = createBackfillSummaryTimeSeriesRecord( -2, "Bank & Credit Accounts", beforeDate, sumValue)
+        upsertAccountsTimeSeriesRecord( db, record )  
+
+        sumValue = getPrevTimeSeriesRecordsSumValue( filterNonBankAndCreditAccounts(accounts), beforeDate, db )
+        record = createBackfillSummaryTimeSeriesRecord( -3, "Investment & Other Accounts", beforeDate, sumValue)
+        upsertAccountsTimeSeriesRecord( db, record )  
+
+        # move back 7 days
+        currTimestamp_s = currTimestamp_s - (7 * 86400)
+
+
+#
+# Backfill account timeseries records.
 #
 # For each account...
-# Find earliest accountsTimeSeries entry
-# Check if there are any earlier transactions
-# If yes, get trans between 'earliest accountsTimeSeries date' and 7 days prior
-# Sum total value of trans
-# Create new accountsTimeSeries entry
+#   Find earliest accountsTimeSeries entry
+#     Check if there are any earlier transactions
+#     If yes, get trans between 'earliest accountsTimeSeries date' and 7 days prior
+#     Sum total value of trans
+#     Create new accountsTimeSeries entry
+#   Loop
 # Loop
 # 
 def backfillAccountsTimeSeries( args ):
@@ -1319,7 +1504,7 @@ def autoTagTrans( args ):
         if (alreadyTagged == False):
             applyPrevTranTags(tran, db)
 
-        updateTran(tran, db)   # TODO
+        updateTran(tran, db)   
 
 #
 # backfill auto tags
@@ -1329,7 +1514,7 @@ def backfillAutoTags( args ):
     trans = db.transactions.find({}, projection={ "_id": True, "txnType": True, "tags": True } );
     for tran in trans:
         applyAutoTags(tran)
-        updateTran(tran, db)   # TODO
+        updateTran(tran, db)  
 
 
 #
@@ -1668,6 +1853,17 @@ elif args["--action"] == "checkUserDb":
     args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     checkUserDb( args );
+
+elif args["--action"] == "backfillSummaryTimeSeries":
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
+    backfillSummaryTimeSeries( args );
+
+elif args["--action"] == "doUpsertSummaryTimeSeries":
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
+    doUpsertSummaryTimeSeries( args );
+
 
 
 
