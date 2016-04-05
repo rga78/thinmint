@@ -151,6 +151,17 @@ if [ $? -ne 0 ]; then
 fi
 
 
+#
+# Group tran amounts by tag, by month
+#
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action groupTransByTagByMonth --mongouri "$mongouri" 
+./mintclient.py --action groupTransByTagByMonth --mongouri "$mongouri" 
+
+if [ $? -ne 0 ]; then
+    exit $?
+fi
+
 
 #
 # Compose email with status update, new trans in need of ACK'ing

@@ -611,7 +611,7 @@ class UserDb:
         self.userId = userId
         self.db = mongoDb
 
-        for collectionName in ["tags", "accounts", "accountsTimeSeries", "transactions", "savedqueries" ]:
+        for collectionName in ["tags", "accounts", "accountsTimeSeries", "transactions", "savedqueries", "tagsByMonth" ]:
             setattr(self, collectionName, self.getUserCollection(mongoDb, userId, collectionName))
 
     #
@@ -678,6 +678,9 @@ def getAccountIdTimeSeriesId( accountId, datestr ):
     return str(accountId) + "." + datestr
 
 
+#
+# Looks like only fiLastUpdated field has timestamp in ms.
+# All other timestamps in seconds.
 #
 # @param timestamp_ms in milliseconds
 #
@@ -1722,6 +1725,76 @@ def addMintCreds( user, args ):
     return args
 
 
+
+#
+# @param trans cursor
+#
+# @return map of maps: byTagByMonth[tag][yearMonth] = sum(amountValue)
+#
+def groupByTagByMonth( trans ):
+    retMe = {}
+
+    for tran in trans:
+        yearMonth = datetime.fromtimestamp( tran["timestamp"] ).strftime( "%Y.%m" )
+
+        for tag in ( tran["tags"] if "tags" in tran and tran["tags"] else ["(untagged)"] ):
+            byTag = retMe.setdefault(tag, {})
+            byMonth = byTag.setdefault(yearMonth,{})
+            byMonth["sumAmountValue"] = byMonth.setdefault("sumAmountValue",0) + tran["amountValue"]
+            byMonth["countTrans"] = byMonth.setdefault("countTrans",0) + 1
+
+    return retMe
+
+
+#
+# @return a record for transByTagByMonth collection
+#
+def createTagsByMonthRecord( tag, yearMonth, byMonthData ):
+    return { "_id": tag + "-" + yearMonth, 
+             "tag": tag,
+             "yearMonth": yearMonth,
+             "sumAmountValue": byMonthData["sumAmountValue"],
+             "countTrans": byMonthData["countTrans"] }
+
+
+#
+# Upsert record.
+#
+def upsertTagsByMonth( db, record ):
+    print("upsertTagsByMonth: record:", record )
+    db.tagsByMonth.update_one( { "_id": record["_id"] }, 
+                               { "$set": record }, 
+                               upsert=True )
+
+#
+# Group all tran amounts by tag and by month, to get a breakdown of 
+# spending per tag per month.
+#
+def groupTransByTagByMonth( args ):
+
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
+
+    # TODO: drop the entire table (to clear out defunct tags)
+    # Get all trans. Untagged trans will be grouped under tag="(untagged)"  
+    trans = db.transactions.find({ 
+                                   "mintMarker": 1 
+                                 }, 
+                                 projection= { "tags": True, 
+                                               "amountValue": True,
+                                               "timestamp": True 
+                                             })
+    #
+    # byTagByMonth[tag][yearMonth] = sum(amountValue)
+    #
+    byTagByMonth = groupByTagByMonth(trans)
+    print("groupByTagByMonth: byTagByMonth:", json.dumps( byTagByMonth, indent=2, sort_keys=True)  )
+
+    for tag in byTagByMonth:
+        for yearMonth in byTagByMonth[tag]:
+            upsertTagsByMonth( db, createTagsByMonthRecord(tag, yearMonth, byTagByMonth[tag][yearMonth] ) )
+
+
+
 #
 # main entry point ---------------------------------------------------------------------------
 # 
@@ -1863,6 +1936,11 @@ elif args["--action"] == "doUpsertSummaryTimeSeries":
     args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     doUpsertSummaryTimeSeries( args );
+
+elif args["--action"] == "groupTransByTagByMonth":
+    args = setUser(args, user)
+    args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
+    groupTransByTagByMonth( args );
 
 
 
