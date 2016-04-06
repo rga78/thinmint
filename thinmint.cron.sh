@@ -78,9 +78,22 @@ if [ $? -ne 0 ]; then
     exit $?
 fi
 
-# TODO: backfill timeseries
-# ./mintclient.py --action backfillAccountsTimeSeries --mongouri $mongouri
-# ./mintclient.py --action backfillSummaryTimeSeries --mongouri $mongouri
+
+#
+# Backfill timeseries data
+# Note: this doesn't really have to be run every time.  Most of the time it will just be overwriting
+# existing backfill data with the exact same data.  HOWEVER... if a new account shows up in mint, 
+# we need to call this to get it backfilled.  AND... if for whatever reason mint deletes or adds an
+# old tran to an existing account, we need to call this to update the backfill data.
+#
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action backfillAccountsTimeSeries --mongouri "$mongouri"
+./mintclient.py --action backfillAccountsTimeSeries --mongouri "$mongouri"
+
+echo "--------------------------------------------------------------------------------------------"
+echo ./mintclient.py --action backfillSummaryTimeSeries --mongouri "$mongouri"
+./mintclient.py --action backfillSummaryTimeSeries --mongouri "$mongouri"
+
 
 #
 # Update account performance (last 7 days, 30 days, and so on)

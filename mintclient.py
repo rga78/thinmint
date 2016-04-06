@@ -1367,9 +1367,10 @@ def getPrevTimeSeriesRecordsSumValue( accounts, beforeDate, db ):
 # backfill summary timeseries (net worth, bank and credit, investment and other)
 #
 # Start at currDate = today
-#   find prev accountTimeSeries entry prior to currDate for each account 
-#   create timeseries recourd by summing balances
+#   for each summary account, find prev accountTimeSeries entry prior to currDate (it's the same for all summary accounts)
+#   create timeseries recourd by summing (non-summary-)account balances
 #   currDate = currDate - 7 days.
+#
 # Loop until no more accountTimeSeries records exist earlier than the given date
 # 
 # 
