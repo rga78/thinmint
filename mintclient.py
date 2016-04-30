@@ -1775,7 +1775,11 @@ def groupTransByTagByMonth( args ):
 
     db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
-    # TODO: drop the entire table (to clear out defunct tags)
+    # Clear the entire tagsByMonth table.
+    # By clearing the table we get rid of stale defunct tags 
+    # The code below rebuilds the full table.
+    db.tagsByMonth.remove({})
+
     # Get all trans. Untagged trans will be grouped under tag="(untagged)"  
     trans = db.transactions.find({ 
                                    "mintMarker": 1 
