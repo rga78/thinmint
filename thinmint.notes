@@ -1,5 +1,9 @@
 
 
+==== heroku ======================================================================================
+
+https://young-bayou-67234.herokuapp.com/ | https://git.heroku.com/young-bayou-67234.git
+
 
 ==== auto-tagging =================================================================================
 
@@ -22,8 +26,8 @@ or just apply tags from the previous tran only?  <-- this one.
 $ C:\easy\mysandbox\thinmint> C:\mongodb-2.6.11\bin\mongoimport --host localhost --db thinmint --collection accountsTimeSeries --jsonArray --file data/backfill.401k.json
 $ C:\easy\mysandbox\thinmint> C:\mongodb-2.6.11\bin\mongoimport --host localhost --db thinmint --collection accountsTimeSeries --jsonArray --file data/backfill.ibmstock.json
 
-$ ./mintclient.py --action setAccountsTimeSeriesTimestamps --mongouri $mongouri
-$ ./mintclient.py --action setAccountPerformance --mongouri $mongouri
+$ ./mintclient.py --action setAccountsTimeSeriesTimestamps 
+$ ./mintclient.py --action setAccountPerformance 
  
 
 

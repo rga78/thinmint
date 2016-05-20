@@ -26,12 +26,8 @@ fi
 
 source ./.thinmint.env
 
-# -rx- if [ -z "$gmailuser" ]; then
-# -rx-     usage "\$gmailuser is not defined"
-# -rx- elif [ -z "$gmailpass" ]; then
-# -rx-     usage "\$gmailpass is not defined"
-if [ -z "$mongouri" ]; then
-    usage "\$mongouri is not defined"
+if [ -z "$TM_MONGO_URI" ]; then
+    usage "\$TM_MONGO_URI is not defined"
 fi
 
 
@@ -39,8 +35,8 @@ fi
 # Send account refresh signal to mint
 # 
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action refreshMintAccounts --mongouri "$mongouri"
-./mintclient.py --action refreshMintAccounts --mongouri "$mongouri"
+echo ./mintclient.py --action refreshMintAccounts 
+./mintclient.py --action refreshMintAccounts 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -54,12 +50,13 @@ echo "--------------------------------------------------------------------------
 echo "sleep 300: (started `date`)"
 sleep 300
 
+
 #
 # Get mint data
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action importMintDataToMongo --mongouri $mongouri
-./mintclient.py --action importMintDataToMongo --mongouri "$mongouri"
+echo ./mintclient.py --action importMintDataToMongo 
+./mintclient.py --action importMintDataToMongo 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -71,8 +68,8 @@ fi
 # This action attempts to transfer the tags from the old "marooned" copies to the new copies
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action syncMaroonedTrans --mongouri "$mongouri"
-./mintclient.py --action syncMaroonedTrans --mongouri "$mongouri"
+echo ./mintclient.py --action syncMaroonedTrans 
+./mintclient.py --action syncMaroonedTrans 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -87,20 +84,20 @@ fi
 # old tran to an existing account, we need to call this to update the backfill data.
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action backfillAccountsTimeSeries --mongouri "$mongouri"
-./mintclient.py --action backfillAccountsTimeSeries --mongouri "$mongouri"
+echo ./mintclient.py --action backfillAccountsTimeSeries 
+./mintclient.py --action backfillAccountsTimeSeries 
 
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action backfillSummaryTimeSeries --mongouri "$mongouri"
-./mintclient.py --action backfillSummaryTimeSeries --mongouri "$mongouri"
+echo ./mintclient.py --action backfillSummaryTimeSeries 
+./mintclient.py --action backfillSummaryTimeSeries 
 
 
 #
 # Update account performance (last 7 days, 30 days, and so on)
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action setAccountPerformance --mongouri $mongouri
-./mintclient.py --action setAccountPerformance --mongouri $mongouri
+echo ./mintclient.py --action setAccountPerformance 
+./mintclient.py --action setAccountPerformance 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -111,8 +108,8 @@ fi
 # Resolve pending trans
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
-./mintclient.py --action resolvePendingTransactions --mongouri "$mongouri" 
+echo ./mintclient.py --action resolvePendingTransactions 
+./mintclient.py --action resolvePendingTransactions 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -123,8 +120,8 @@ fi
 # Remove unused tags
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action refreshTags --mongouri "$mongouri" 
-./mintclient.py --action refreshTags --mongouri "$mongouri" 
+echo ./mintclient.py --action refreshTags 
+./mintclient.py --action refreshTags 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -135,8 +132,8 @@ fi
 # Auto tag..
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action autoTagTrans --mongouri "$mongouri" 
-./mintclient.py --action autoTagTrans --mongouri "$mongouri" 
+echo ./mintclient.py --action autoTagTrans 
+./mintclient.py --action autoTagTrans 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -156,8 +153,8 @@ fi
 #       to the new pending tran.
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action syncRemovedPendingTrans --mongouri "$mongouri" 
-./mintclient.py --action syncRemovedPendingTrans --mongouri "$mongouri" 
+echo ./mintclient.py --action syncRemovedPendingTrans 
+./mintclient.py --action syncRemovedPendingTrans 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -168,8 +165,8 @@ fi
 # Group tran amounts by tag, by month
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action groupTransByTagByMonth --mongouri "$mongouri" 
-./mintclient.py --action groupTransByTagByMonth --mongouri "$mongouri" 
+echo ./mintclient.py --action groupTransByTagByMonth 
+./mintclient.py --action groupTransByTagByMonth 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -180,8 +177,8 @@ fi
 # Compose email with status update, new trans in need of ACK'ing
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action composeEmailSummary --mongouri=xxx --outputfile=data/email.txt
-./mintclient.py --action composeEmailSummary --mongouri="$mongouri" --outputfile=data/email.txt
+echo ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
 
 if [ $? -ne 0 ]; then
     exit $?

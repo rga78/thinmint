@@ -4,28 +4,7 @@
 #
 # Downloads trans from mint, merges with thinmint db, sends summary email.
 #
-#
-# Usage:
-#
-# Download mint trans and accounts:
-#   $ python3 mintclient.py --action getMintTransactions --mintuser . --mintpass . --outputfile=trans.mint.json
-#   $ python3 mintclient.py --action getMintAccounts --mintuser . --mintpass . --outputfile=accounts.mint.json
-#
-# Convert initial mint trans download to thinmint trans (only do this once. subsequently use mergeTransactions)
-#   $ python3 mintclient.py --action convertTransactionsToMap --inputfile=trans.mint.json --outputfile=trans.thinmint.json
-#
-# Set hasBeenAcked=true for all initial trans (only do this once).
-#   $ python3 mintclient.py --action setHasBeenAcked --inputfile=trans.thinmint.json --outputfile=trans.thinmint.json
-#
-# Download new mint trans, merge with existing thinmint trans
-#   $ python3 mintclient.py --action getMintTransactions --mintuser . --mintpass . --outputfile=data/trans.mint.json
-#   $ python3 mintclient.py --action mergeTransactions --mintfile=data/trans.mint.json --inputfile=data/trans.thinmint.json --outputfile=data/trans.thinmint.json
-#
-# Send email with status update, new trans in need of ACK'ing
-#   $ python3 mintclient.py --action composeEmailSummary --transfile=trans.thinmint.json --accountsfile=accounts.mint.json --outputfile=email.txt
-#   $ python3 mintclient.py --action sendEmailSummary ---inputfile=email.txt --to . --gmailuser . --gmailpass .
-# 
-# 
+# Usage: see thinmint.cron.sh
 # 
 # mintapi APIs:
 # mint.get_accounts()
@@ -38,7 +17,7 @@
 # 
 
 import json
-import mintapi
+import mintapi1
 import getopt
 import sys
 import re
@@ -151,7 +130,7 @@ def convertAccounts( accounts ):
 #
 def refreshMintAccounts( args ):
     print( "refreshMintAccounts: Logging into mint..." )
-    mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
+    mint = mintapi1.Mint( args["--mintuser"], args["--mintpass"] )
     print( "refreshMintAccounts: Refreshing accounts..." )
     mint.initiate_account_refresh()
 
@@ -162,7 +141,7 @@ def refreshMintAccounts( args ):
 #
 def getMintAccounts( args ):
     print( "getMintAccounts: Logging into mint..." )
-    mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
+    mint = mintapi1.Mint( args["--mintuser"], args["--mintpass"] )
 
     print( "getMintAccounts: Getting accounts..." )
     accounts = mint.get_accounts(True)  # True - get extended account detail (takes longer)
@@ -183,7 +162,7 @@ def doGetMintAccounts( args ):
 # 
 def getMintTransactions( args ):
     print( "getMintTransactions: Logging into mint..." )
-    mint = mintapi.Mint( args["--mintuser"], args["--mintpass"] )
+    mint = mintapi1.Mint( args["--mintuser"], args["--mintpass"] )
 
     print( "getMintTransactions: Getting transactions..." )
     trxs = mint.get_transactions_json(include_investment=True, skip_duplicates=False )     # TODO: start_date
@@ -593,10 +572,10 @@ def sendEmailSummary( args ):
 #
 def getMongoDb( mongoUri ):
     dbname = mongoUri.split("/")[-1]
+    hostname = mongoUri.split("@")[-1]
     mongoClient = MongoClient( mongoUri )
-    print("getMongoDb: connected to {}, database {}".format( mongoUri, dbname ) )
+    print("getMongoDb: connected to mongodb://{}, database {}".format( hostname, dbname ) )
     return mongoClient[dbname]
-
 
 
 #
@@ -930,6 +909,12 @@ def setUser(args, user):
 def getUser(args):
     return args["--user"]
 
+#
+# @return args
+#
+def setMongoUri(args):
+    args['--mongouri'] = decryptCreds( os.environ["TM_MONGO_URI"] )
+    return args
 
 #
 # Download all accounts and trans from mint.
@@ -1666,7 +1651,7 @@ def hashPassword( password ):
 #
 # @return AES-encrypted mintCred
 #
-def encryptMintCred( mintCred ):
+def encryptCreds( mintCred ):
     key = os.environ['TM_AES_KEY'].encode('utf-8')
     return encrypt(key, mintCred).decode('utf-8')
 
@@ -1674,7 +1659,7 @@ def encryptMintCred( mintCred ):
 #
 # @return AES-derypted mintCred
 #
-def decryptMintCred( encMintCred ):
+def decryptCreds( encMintCred ):
     key = os.environ['TM_AES_KEY'].encode('utf-8')
     return decrypt(key, encMintCred)
 
@@ -1691,7 +1676,7 @@ def addUser( args ):
     hashedPassword = hashPassword( password )
 
     mintCred = args['--mintuser'] + ":" + args['--mintpass']
-    encMintCred = encryptMintCred(mintCred)
+    encMintCred = encryptCreds(mintCred)
 
     print("addUser: user=" + user + ", hashedPassword=" + hashedPassword + ", encMintCred=" + encMintCred);
 
@@ -1716,7 +1701,7 @@ def addMintCreds( user, args ):
     if (userRecord is not None):
         print("addMintCreds: userRecord:", userRecord)
 
-        mintCred = decryptMintCred( userRecord["mintCred"] )
+        mintCred = decryptCreds( userRecord["mintCred"] )
         args["--mintuser"] = mintCred.split(":",1)[0]
         args["--mintpass"] = mintCred.split(":",1)[1]
         args["--user"] = user;
@@ -1805,6 +1790,9 @@ def groupTransByTagByMonth( args ):
 # 
 args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
 # -rx- print("main: verified args=", args)
+
+args = setMongoUri(args)
+
 
 # TODO: read user list from DB.
 user="ilana.bram@gmail.com"

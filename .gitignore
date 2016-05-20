@@ -1,3 +1,4 @@
 .*.swp
 data*
 .thinmint.env
+__pycache__
