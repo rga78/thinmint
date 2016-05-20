@@ -33,8 +33,8 @@ fi
 # Send account refresh signal to mint
 # 
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action refreshMintAccounts 
-./mintclient.py --action refreshMintAccounts 
+echo python ./mintclient.py --action refreshMintAccounts 
+python ./mintclient.py --action refreshMintAccounts 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -53,8 +53,8 @@ sleep 300
 # Get mint data
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action importMintDataToMongo 
-./mintclient.py --action importMintDataToMongo 
+echo python ./mintclient.py --action importMintDataToMongo 
+python ./mintclient.py --action importMintDataToMongo 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -66,8 +66,8 @@ fi
 # This action attempts to transfer the tags from the old "marooned" copies to the new copies
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action syncMaroonedTrans 
-./mintclient.py --action syncMaroonedTrans 
+echo python ./mintclient.py --action syncMaroonedTrans 
+python ./mintclient.py --action syncMaroonedTrans 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -82,20 +82,20 @@ fi
 # old tran to an existing account, we need to call this to update the backfill data.
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action backfillAccountsTimeSeries 
-./mintclient.py --action backfillAccountsTimeSeries 
+echo python ./mintclient.py --action backfillAccountsTimeSeries 
+python ./mintclient.py --action backfillAccountsTimeSeries 
 
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action backfillSummaryTimeSeries 
-./mintclient.py --action backfillSummaryTimeSeries 
+echo python ./mintclient.py --action backfillSummaryTimeSeries 
+python ./mintclient.py --action backfillSummaryTimeSeries 
 
 
 #
 # Update account performance (last 7 days, 30 days, and so on)
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action setAccountPerformance 
-./mintclient.py --action setAccountPerformance 
+echo python ./mintclient.py --action setAccountPerformance 
+python ./mintclient.py --action setAccountPerformance 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -106,8 +106,8 @@ fi
 # Resolve pending trans
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action resolvePendingTransactions 
-./mintclient.py --action resolvePendingTransactions 
+echo python ./mintclient.py --action resolvePendingTransactions 
+python ./mintclient.py --action resolvePendingTransactions 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -118,8 +118,8 @@ fi
 # Remove unused tags
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action refreshTags 
-./mintclient.py --action refreshTags 
+echo python ./mintclient.py --action refreshTags 
+python ./mintclient.py --action refreshTags 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -130,8 +130,8 @@ fi
 # Auto tag..
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action autoTagTrans 
-./mintclient.py --action autoTagTrans 
+echo python ./mintclient.py --action autoTagTrans 
+python ./mintclient.py --action autoTagTrans 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -151,8 +151,8 @@ fi
 #       to the new pending tran.
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action syncRemovedPendingTrans 
-./mintclient.py --action syncRemovedPendingTrans 
+echo python ./mintclient.py --action syncRemovedPendingTrans 
+python ./mintclient.py --action syncRemovedPendingTrans 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -163,8 +163,8 @@ fi
 # Group tran amounts by tag, by month
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action groupTransByTagByMonth 
-./mintclient.py --action groupTransByTagByMonth 
+echo python ./mintclient.py --action groupTransByTagByMonth 
+python ./mintclient.py --action groupTransByTagByMonth 
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -175,8 +175,8 @@ fi
 # Compose email with status update, new trans in need of ACK'ing
 #
 echo "--------------------------------------------------------------------------------------------"
-echo ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
-./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+echo python ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+python ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
 
 if [ $? -ne 0 ]; then
     exit $?
@@ -185,11 +185,11 @@ fi
 # 
 # Send email
 #
-# -rx- echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to robertgalderman@gmail.com --gmailuser xxx --gmailpass xxx
-# -rx- ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'robertgalderman@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
+# -rx- echo python ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to robertgalderman@gmail.com --gmailuser xxx --gmailpass xxx
+# -rx- python ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'robertgalderman@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
 # -rx- 
-# -rx- echo ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser xxx --gmailpass xxx 
-# -rx- ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
+# -rx- echo python ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to ilana.bram@gmail.com --gmailuser xxx --gmailpass xxx 
+# -rx- python ./mintclient.py --action sendEmailSummary --inputfile=data/email.txt --to 'ilana.bram@gmail.com' --gmailuser "$gmailuser" --gmailpass "$gmailpass"
 #
 # add user
 # ./mintclient.py --action addUser --user xx --pass xx --mintuser xx --mintpass xx
