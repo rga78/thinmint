@@ -4,6 +4,9 @@
 
 https://young-bayou-67234.herokuapp.com/ | https://git.heroku.com/young-bayou-67234.git
 
+removed:
+pandas == 0.17.1
+
 
 ==== auto-tagging =================================================================================
 
