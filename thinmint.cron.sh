@@ -171,16 +171,16 @@ if [ $? -ne 0 ]; then
 fi
 
 
-#
-# Compose email with status update, new trans in need of ACK'ing
-#
-echo "--------------------------------------------------------------------------------------------"
-echo python ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
-python ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
-
-if [ $? -ne 0 ]; then
-    exit $?
-fi
+# -rx- #
+# -rx- # Compose email with status update, new trans in need of ACK'ing
+# -rx- #
+# -rx- echo "--------------------------------------------------------------------------------------------"
+# -rx- echo python ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+# -rx- python ./mintclient.py --action composeEmailSummary --outputfile=data/email.txt
+# -rx- 
+# -rx- if [ $? -ne 0 ]; then
+# -rx-     exit $?
+# -rx- fi
 
 # 
 # Send email
@@ -195,5 +195,10 @@ fi
 # ./mintclient.py --action addUser --user xx --pass xx --mintuser xx --mintpass xx
 
 
+#
+# Done
+#
+echo "--------------------------------------------------------------------------------------------"
+echo "Processing complete.
 
 
