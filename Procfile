@@ -1,0 +1,1 @@
+go: ./thinmint.cron.sh
