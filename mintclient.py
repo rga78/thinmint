@@ -41,7 +41,7 @@ from mailer import Message
 from pymongo import MongoClient
 
 import locale
-locale.setlocale( locale.LC_ALL, '' )
+locale.setlocale( locale.LC_ALL, 'en_US.utf8' )
 
 
 #

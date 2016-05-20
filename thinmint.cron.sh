@@ -24,8 +24,6 @@ if [ "$1" = "-h" ]; then
     usage
 fi
 
-source ./.thinmint.env
-
 if [ -z "$TM_MONGO_URI" ]; then
     usage "\$TM_MONGO_URI is not defined"
 fi
