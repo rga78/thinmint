@@ -199,6 +199,6 @@ fi
 # Done
 #
 echo "--------------------------------------------------------------------------------------------"
-echo "Processing complete.
+echo "Processing complete."
 
 
