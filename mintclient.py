@@ -533,7 +533,7 @@ def composeAndSendEmailSummary( args ) :
     db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     # read trans that have yet to be acked.
-    trans = getNonAckedTransactions( db )
+    trans = list(getNonAckedTransactions( db ))
 
     print("composeAndSendEmailSummary: len(trans):", len(trans))
 
@@ -542,14 +542,9 @@ def composeAndSendEmailSummary( args ) :
         return
 
     # read active bank and credit card accounts
-    accounts = getActiveBankAndCreditAccounts( db )
+    accounts = list(getActiveBankAndCreditAccounts( db ))
     
     html_body = "".join( composeHtmlEmail( accounts, trans ) )
-
-    # need to rewind the cursors
-    trans.rewind()
-    accounts.rewind()
-
     text_body = "\n".join( composeTextEmail( accounts, trans ) )
 
     sendEmail( "team@surfapi.com", 

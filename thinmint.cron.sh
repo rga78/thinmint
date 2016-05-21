@@ -194,6 +194,12 @@ fi
 # add user
 # ./mintclient.py --action addUser --user xx --pass xx --mintuser xx --mintpass xx
 
+#
+# Compose and Send email
+#
+echo "--------------------------------------------------------------------------------------------"
+echo python ./mintclient.py --action composeAndSendEmailSummary 
+python ./mintclient.py --action composeAndSendEmailSummary 
 
 #
 # Done
