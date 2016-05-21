@@ -481,8 +481,12 @@ def composeHtmlEmail( accounts, newTrxs ):
 #
 # @return trans that have yet to be acked.
 #
-def getNonAckedTransactions( db ):
-    trans = db.transactions.find( { "$or": [ { "hasBeenAcked": { "$exists": False } }, { "hasBeenAcked" : False } ] } )
+def getNonAckedTransactions( db, sort ):
+    trans = db.transactions.find( { 
+                                      "$or": [ { "hasBeenAcked": { "$exists": False } }, { "hasBeenAcked" : False } ],
+                                      "mintMarker": 1
+                                  },
+                                  sort=sort )
     print("getNonAckedTransactions: Found {} non-ACKed transactions out of {}".format( trans.count(), db.transactions.count() ) )
     return trans
 
@@ -512,7 +516,7 @@ def doComposeEmailSummary( args ) :
     db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     # read trans that have yet to be acked.
-    trans = getNonAckedTransactions( db )
+    trans = getNonAckedTransactions( db, sort=[ ("timestamp", -1) ] )
 
     # read active bank and credit card accounts
     accounts = getActiveBankAndCreditAccounts( db )
@@ -533,7 +537,7 @@ def composeAndSendEmailSummary( args ) :
     db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
 
     # read trans that have yet to be acked.
-    trans = list(getNonAckedTransactions( db ))
+    trans = list( getNonAckedTransactions( db, sort=[ ("timestamp", -1) ] ) )
 
     print("composeAndSendEmailSummary: len(trans):", len(trans))
 
@@ -570,7 +574,6 @@ def doComposeEmailSummary_OLD( args ) :
     
     writeLines( composeHtmlEmail( accounts, newTrxs ), args["--outputfile"] + ".html" )
     writeLines( composeTextEmail( accounts, newTrxs ), args["--outputfile"] )
-
 
 
 #
@@ -1537,7 +1540,7 @@ def applyPrevTranTags(tran, db):
 #
 def autoTagTrans( args ):
     db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
-    trans = getNonAckedTransactions( db )
+    trans = getNonAckedTransactions( db, sort=[ ("timestamp", 1) ] )
 
     for tran in trans:
         alreadyTagged = (len( tran.setdefault("tags",[]) ) > 0)
