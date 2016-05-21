@@ -553,7 +553,7 @@ def composeAndSendEmailSummary( args ) :
 
     sendEmail( "team@surfapi.com", 
                args["--user"], 
-               "ThinMint: You have {0} un-ACKknowledged transactions".format( len(trans) ),
+               "ThinMint: You have {0} un-ACK-nowledged transactions".format( len(trans) ),
                text_body,
                html_body )
 
