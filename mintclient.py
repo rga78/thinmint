@@ -548,7 +548,7 @@ def composeAndSendEmailSummary( args ) :
     text_body = "\n".join( composeTextEmail( accounts, trans ) )
 
     sendEmail( "team@surfapi.com", 
-               "robertgalderman@gmail.com", # TODO: args["--user"], 
+               args["--user"], 
                "ThinMint: You have {0} un-ACKknowledged transactions".format( len(trans) ),
                text_body,
                html_body )
