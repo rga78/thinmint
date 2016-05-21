@@ -40,8 +40,11 @@ from mailer import Message
 
 from pymongo import MongoClient
 
+from postmark import PMMail
+
 import locale
 locale.setlocale( locale.LC_ALL, 'en_US.utf8' )
+
 
 
 #
@@ -447,7 +450,7 @@ def formatAccounts( accounts, formatFunc ):
 # 
 def composeTextEmail( accounts, newTrxs ):
     retMe = []
-    retMe.append( "Summary of new transactions:")
+    retMe.append( "www.mintwrap.com: Summary of new transactions:")
     retMe.append("")
     retMe += formatNewTrans( newTrxs, formatNewTranText )
     retMe.append("")
@@ -463,7 +466,7 @@ def composeTextEmail( accounts, newTrxs ):
 # 
 def composeHtmlEmail( accounts, newTrxs ):
     retMe = []
-    retMe.append("<b>Summary of new transactions</b><br/>")
+    retMe.append("<b><a href='www.mintwrap.com'>Login to ThinMint</a>: Summary of new transactions</b><br/>")
     retMe.append("<table>")
     retMe += formatNewTrans( newTrxs, formatNewTranHtml )
     retMe.append("</table>")
@@ -522,6 +525,39 @@ def doComposeEmailSummary( args ) :
     writeLines( composeTextEmail( accounts, trans ), args["--outputfile"] )
 
 
+#
+# Compose and send an email summarizing new un-acked trans
+#
+def composeAndSendEmailSummary( args ) : 
+
+    db = getUserDb( getMongoDb( args["--mongouri"] ), args["--user"] )
+
+    # read trans that have yet to be acked.
+    trans = getNonAckedTransactions( db )
+
+    print("composeAndSendEmailSummary: len(trans):", len(trans))
+
+    # don't bother sending the email if there are few new trans
+    if len(trans) < 7:
+        return
+
+    # read active bank and credit card accounts
+    accounts = getActiveBankAndCreditAccounts( db )
+    
+    html_body = "".join( composeHtmlEmail( accounts, trans ) )
+
+    # need to rewind the cursors
+    trans.rewind()
+    accounts.rewind()
+
+    text_body = "\n".join( composeTextEmail( accounts, trans ) )
+
+    sendEmail( "team@surfapi.com", 
+               "robertgalderman@gmail.com", # TODO: args["--user"], 
+               "ThinMint: You have {0} un-ACKknowledged transactions".format( len(trans) ),
+               text_body,
+               html_body )
+
 
 #
 # Compose an email summary and write it to the --outputfile
@@ -565,6 +601,27 @@ def sendEmailSummary( args ):
                      usr=args["--gmailuser"],
                      pwd=args["--gmailpass"] )
     sender.send(message)
+
+
+#
+# Send email
+#
+def sendEmail( fromAddr, toAddr, subject, text_body, html_body):
+
+    print("sendEmail: fromAddr:", fromAddr,
+                       "toAddr:", toAddr,
+                      "subject:", subject,
+                    "text_body:", text_body,
+                    "html_body:", html_body )
+
+    message = PMMail(api_key = os.environ.get('POSTMARK_API_TOKEN'),
+                     subject = subject,
+                     sender = fromAddr,
+                     to = toAddr,
+                     text_body = text_body,
+                     html_body = html_body,
+                     tag = "tm") 
+    message.send()
 
 
 #
@@ -882,11 +939,13 @@ def upsertTransactions( db, trans ):
 def filterActiveAccounts( accounts ):
     return list( filter(lambda act: act["isActive"], accounts) ) 
 
+
 #
 # @return subset of accounts of type "credit" or "bank"
 #
 def filterBankAndCreditAccounts( accounts ):
     return list( filter(lambda account: account["accountType"] in [ "credit", "bank" ], accounts) ) 
+
 
 #
 # @return subset of accounts NOT of type "credit" or "bank"
@@ -1793,9 +1852,10 @@ args = verifyArgs( parseArgs() , required_args = [ '--action' ] )
 
 args = setMongoUri(args)
 
-
 # TODO: read user list from DB.
 user="ilana.bram@gmail.com"
+args = setUser(args, user)
+
 
 if args["--action"] == "getMintAccounts":
     args = verifyArgs( args , required_args = [ '--mintuser', '--mintpass', '--outputfile' ] )
@@ -1839,13 +1899,16 @@ elif args["--action"] == "composeEmailSummary_OLD":
     doComposeEmailSummary_OLD( args )
 
 elif args["--action"] == "composeEmailSummary":
-    args = setUser(args, user)
-    args = verifyArgs( args , required_args = [ '--user', '--mongouri', '--outputfile' ] )
+    args = verifyArgs( args , required_args = [ '--user', '--outputfile' ] )
     doComposeEmailSummary( args )
 
 elif args["--action"] == "sendEmailSummary":
     args = verifyArgs( args , required_args = [ '--inputfile', '--gmailuser', '--gmailpass', '--to' ] )
     sendEmailSummary( args )
+
+elif args["--action"] == "composeAndSendEmailSummary":
+    args = verifyArgs( args , required_args = [ '--mongouri', '--user' ] )
+    composeAndSendEmailSummary( args )
 
 elif args["--action"] == "importMintDataToMongo":
     args = addMintCreds( user, args)
@@ -1853,42 +1916,34 @@ elif args["--action"] == "importMintDataToMongo":
     importMintDataToMongo( args )
 
 elif args["--action"] == "resolvePendingTransactions":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     resolvePendingTransactions( args )
 
 elif args["--action"] == "setTransactionTimestamps":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setTransactionTimestamps( args )
 
 elif args["--action"] == "setTransactionAmountValues":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setTransactionAmountValues( args )
 
 elif args["--action"] == "setAccountsTimeSeriesTimestamps":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setAccountsTimeSeriesTimestamps( args )
 
 elif args["--action"] == "setAccountPerformance":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     setAccountPerformance( args );
 
 elif args["--action"] == "backfillAccountsTimeSeries":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     backfillAccountsTimeSeries( args );
 
 elif args["--action"] == "refreshTags":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = ['--user',  '--mongouri' ] )
     refreshTags( args );
 
 elif args["--action"] == "autoTagTrans":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     autoTagTrans( args );
 
@@ -1901,37 +1956,30 @@ elif args["--action"] == "addMintCreds":
     addMintCreds( args['--user'], args );
 
 elif args["--action"] == "backfillAutoTags":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     backfillAutoTags( args );
 
 elif args["--action"] == "syncRemovedPendingTrans":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     syncRemovedPendingTrans( args );
 
 elif args["--action"] == "syncMaroonedTrans":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     syncMaroonedTrans( args );
 
 elif args["--action"] == "checkUserDb":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     checkUserDb( args );
 
 elif args["--action"] == "backfillSummaryTimeSeries":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     backfillSummaryTimeSeries( args );
 
 elif args["--action"] == "doUpsertSummaryTimeSeries":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     doUpsertSummaryTimeSeries( args );
 
 elif args["--action"] == "groupTransByTagByMonth":
-    args = setUser(args, user)
     args = verifyArgs( args , required_args = [ '--user', '--mongouri' ] )
     groupTransByTagByMonth( args );
 
